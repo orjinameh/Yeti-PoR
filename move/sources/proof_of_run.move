@@ -4,6 +4,7 @@ module proof_of_run::proof_of_run;
 
 use sui::clock::Clock;
 use sui::random::{Self, Random};
+use sui::table::{Self, Table};
 
 const TICKS: u64 = 600;
 const STAGE_TICKS: u64 = 150;
@@ -14,6 +15,10 @@ const SHOT_CD: u64 = 3;
 const RANGE: u64 = 12;
 const E_BAD_LOG: u64 = 1;
 const E_SCORE_MISMATCH: u64 = 2;
+const E_DAY_FINALIZED: u64 = 3;
+const E_DAY_OPEN: u64 = 4;
+const E_NO_DAY: u64 = 5;
+const DAY_MS: u64 = 86400000;
 
 const PROFILE: vector<u64> = vector[9, 16, 22, 27, 30, 31, 31, 30, 27, 22, 16, 9];
 
@@ -26,8 +31,95 @@ public struct Entry has copy, drop, store { player: address, score: u64 }
 
 public struct Leaderboard has key { id: UID, entries: vector<Entry> }
 
+/// One top-10 per UTC day (best score per player) plus season points per player.
+public struct DayBoard has store { entries: vector<Entry>, finalized: bool }
+
+public struct Registry has key { id: UID, days: Table<u64, DayBoard>, season: Table<address, u64> }
+
+/// Minted to the verified winner of a finished daily challenge.
+public struct Trophy has key, store { id: UID, day: u64, seed: u64, score: u64 }
+
 fun init(ctx: &mut TxContext) {
     transfer::share_object(Leaderboard { id: object::new(ctx), entries: vector[] });
+    transfer::share_object(Registry { id: object::new(ctx), days: table::new(ctx), season: table::new(ctx) });
+}
+
+fun sort_desc(v: &mut vector<Entry>) {
+    let n = v.length();
+    let mut i = 1;
+    while (i < n) {
+        let mut k = i;
+        while (k > 0 && v[k].score > v[k - 1].score) {
+            v.swap(k, k - 1);
+            k = k - 1;
+        };
+        i = i + 1;
+    };
+}
+
+fun record_day(reg: &mut Registry, day: u64, player: address, score: u64) {
+    if (!reg.days.contains(day)) {
+        reg.days.add(day, DayBoard { entries: vector[], finalized: false });
+    };
+    let b = reg.days.borrow_mut(day);
+    assert!(!b.finalized, E_DAY_FINALIZED);
+    let n = b.entries.length();
+    let mut i = 0;
+    let mut found = false;
+    while (i < n) {
+        if (b.entries[i].player == player) {
+            found = true;
+            if (score > b.entries[i].score) {
+                let e = &mut b.entries[i];
+                e.score = score;
+            };
+            break
+        };
+        i = i + 1;
+    };
+    if (!found) b.entries.push_back(Entry { player, score });
+    sort_desc(&mut b.entries);
+    while (b.entries.length() > MAX_ENTRIES) { b.entries.pop_back(); };
+}
+
+fun add_points(reg: &mut Registry, player: address, pts: u64) {
+    if (reg.season.contains(player)) {
+        let v = reg.season.borrow_mut(player);
+        *v = *v + pts;
+    } else {
+        reg.season.add(player, pts);
+    };
+}
+
+/// Anyone can finalize a day once it has ended: top 3 get season points (5/3/1), the winner gets a Trophy.
+entry fun finalize_day(reg: &mut Registry, clock: &Clock, day: u64, ctx: &mut TxContext) {
+    assert!(day < clock.timestamp_ms() / DAY_MS, E_DAY_OPEN);
+    assert!(reg.days.contains(day), E_NO_DAY);
+    let mut winners = vector<address>[];
+    let mut top_score = 0u64;
+    {
+        let b = reg.days.borrow_mut(day);
+        assert!(!b.finalized, E_DAY_FINALIZED);
+        b.finalized = true;
+        let n = b.entries.length();
+        assert!(n > 0, E_NO_DAY);
+        top_score = b.entries[0].score;
+        let mut i = 0;
+        while (i < n && i < 3) {
+            winners.push_back(b.entries[i].player);
+            i = i + 1;
+        };
+    };
+    let pts = vector[5u64, 3, 1];
+    let mut j = 0;
+    while (j < winners.length()) {
+        add_points(reg, winners[j], pts[j]);
+        j = j + 1;
+    };
+    transfer::public_transfer(
+        Trophy { id: object::new(ctx), day, seed: daily_seed(day), score: top_score },
+        winners[0],
+    );
 }
 
 /// Daily challenge seed. MUST match dailySeed() in lib/daily.ts.
@@ -168,6 +260,7 @@ entry fun start_daily_run(clock: &Clock, ctx: &mut TxContext) {
 /// A forged log or score aborts with E_SCORE_MISMATCH and the Run is not consumed.
 entry fun submit_run(
     board: &mut Leaderboard,
+    reg: &mut Registry,
     run: Run,
     jumps: vector<u16>,
     shots: vector<u16>,
@@ -187,8 +280,36 @@ entry fun submit_run(
     };
     if (board.entries.length() > MAX_ENTRIES) { board.entries.pop_back(); };
 
+    if (day > 0) record_day(reg, day, ctx.sender(), score);
+
     transfer::public_transfer(Receipt { id: object::new(ctx), seed, score, day }, ctx.sender());
 }
 
 #[test_only]
 public fun init_for_testing(ctx: &mut TxContext) { init(ctx) }
+
+#[test_only]
+public fun daily_run_for_testing(day: u64, ctx: &mut TxContext) {
+    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day }, ctx.sender());
+}
+
+#[test_only]
+public fun submit_for_testing(
+    board: &mut Leaderboard,
+    reg: &mut Registry,
+    run: Run,
+    jumps: vector<u16>,
+    shots: vector<u16>,
+    claimed_score: u64,
+    ctx: &mut TxContext,
+) { submit_run(board, reg, run, jumps, shots, claimed_score, ctx) }
+
+#[test_only]
+public fun finalize_for_testing(reg: &mut Registry, clock: &Clock, day: u64, ctx: &mut TxContext) {
+    finalize_day(reg, clock, day, ctx)
+}
+
+#[test_only]
+public fun season_points(reg: &Registry, player: address): u64 {
+    if (reg.season.contains(player)) *reg.season.borrow(player) else 0
+}

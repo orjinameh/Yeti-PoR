@@ -5,7 +5,7 @@ import { Transaction } from "@mysten/sui/transactions";
 import Game, { Done, Ghost } from "./Game";
 import { Icon, Mark } from "./icons";
 import type { Runner } from "@/lib/runner.ts";
-import { PACKAGE_ID, LEADERBOARD_ID, RANDOM_ID, CLOCK_ID, MODULE } from "@/lib/config";
+import { PACKAGE_ID, LEADERBOARD_ID, REGISTRY_ID, RANDOM_ID, CLOCK_ID, MODULE } from "@/lib/config";
 import { replay } from "@/lib/engine.ts";
 import { audio } from "@/lib/audio.ts";
 import { dailySeed, utcDay, msUntilNextDay, fmtCountdown } from "@/lib/daily.ts";
@@ -17,6 +17,8 @@ type Mode = "daily" | "free";
 type Session = { key: number; seed: bigint; runId: string | null; verified: boolean; ghost: Ghost | null; label: string };
 type Result = Done & { newBest: boolean; localOk: boolean };
 type Entry = { ok: boolean; msg: string; digest?: string };
+type Row = { player: string; score: string };
+type Tab = "all" | "today" | "season";
 
 const explorer = (d: string) => `https://suiscan.xyz/testnet/tx/${d}`;
 const short = (a: string) => `${a.slice(0, 6)}...${a.slice(-4)}`;
@@ -59,7 +61,10 @@ export default function Console() {
   const [result, setResult] = useState<Result | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [log, setLog] = useState<Entry[]>([]);
-  const [board, setBoard] = useState<{ player: string; score: string }[]>([]);
+  const [board, setBoard] = useState<Row[]>([]);
+  const [dayRows, setDayRows] = useState<Row[]>([]);
+  const [seasonRows, setSeasonRows] = useState<Row[]>([]);
+  const [tab, setTab] = useState<Tab>("all");
   const [busy, setBusy] = useState(false);
   const [sfxOn, setSfxOn] = useState(true);
   const [musicOn, setMusicOn] = useState(true);
@@ -178,7 +183,7 @@ export default function Console() {
         const tx = new Transaction();
         if (m === "daily") tx.moveCall({ target: `${PACKAGE_ID}::${MODULE}::start_daily_run`, arguments: [tx.object(CLOCK_ID)] });
         else tx.moveCall({ target: `${PACKAGE_ID}::${MODULE}::start_run`, arguments: [tx.object(RANDOM_ID)] });
-        const { digest } = await signAndExec({ transaction: tx });
+        const { digest } = await signAndExec({ transaction: tx as any });
         setLoadMsg("WAITING FOR THE CHAIN");
         const r = await client.waitForTransaction({ digest, options: { showObjectChanges: true } });
         const created: any = r.objectChanges?.find((c: any) => c.type === "created" && c.objectType.endsWith(`::${MODULE}::Run`));
@@ -222,9 +227,9 @@ export default function Console() {
       const tx = new Transaction();
       tx.moveCall({
         target: `${PACKAGE_ID}::${MODULE}::submit_run`,
-        arguments: [tx.object(LEADERBOARD_ID), tx.object(s.runId), tx.pure.vector("u16", result.jumps), tx.pure.vector("u16", result.shots), tx.pure.u64(claimed)],
+        arguments: [tx.object(LEADERBOARD_ID), tx.object(REGISTRY_ID), tx.object(s.runId), tx.pure.vector("u16", result.jumps), tx.pure.vector("u16", result.shots), tx.pure.u64(claimed)],
       });
-      const { digest } = await signAndExec({ transaction: tx });
+      const { digest } = await signAndExec({ transaction: tx as any });
       const r = await client.waitForTransaction({ digest, options: { showEffects: true } });
       const ok = r.effects?.status.status === "success";
       push({ ok, msg: ok ? `Verified on-chain. Score ${claimed}.` : `Rejected on-chain: ${r.effects?.status.error}`, digest });
@@ -243,7 +248,46 @@ export default function Console() {
       const f = (o.data?.content as any)?.fields?.entries ?? [];
       setBoard(f.map((e: any) => e.fields ?? e));
     } catch { /* ignore */ }
+    if (!REGISTRY_ID) return;
+    try {
+      const reg = await client.getObject({ id: REGISTRY_ID, options: { showContent: true } });
+      const rf = (reg.data?.content as any)?.fields;
+      const daysId = rf?.days?.fields?.id?.id;
+      const seasonId = rf?.season?.fields?.id?.id;
+      if (daysId) {
+        try {
+          const d = await client.getDynamicFieldObject({ parentId: daysId, name: { type: "u64", value: String(utcDay(Date.now())) } });
+          const ents = (d.data?.content as any)?.fields?.value?.fields?.entries ?? [];
+          setDayRows(ents.map((e: any) => e.fields ?? e));
+        } catch { setDayRows([]); }
+      }
+      if (seasonId) {
+        const list = await client.getDynamicFields({ parentId: seasonId });
+        const objs = await client.multiGetObjects({ ids: list.data.map((x: any) => x.objectId), options: { showContent: true } });
+        const rows = objs.map((o: any) => ({ player: String(o.data?.content?.fields?.name), score: String(o.data?.content?.fields?.value) }));
+        rows.sort((x: Row, y: Row) => Number(y.score) - Number(x.score));
+        setSeasonRows(rows.slice(0, 10));
+      }
+    } catch { /* ignore */ }
   }, [client]);
+
+  const finalizeYesterday = async () => {
+    if (!REGISTRY_ID) return;
+    setBusy(true);
+    try {
+      const tx = new Transaction();
+      tx.moveCall({ target: `${PACKAGE_ID}::${MODULE}::finalize_day`, arguments: [tx.object(REGISTRY_ID), tx.object(CLOCK_ID), tx.pure.u64(utcDay(Date.now()) - 1)] });
+      const { digest } = await signAndExec({ transaction: tx as any });
+      await client.waitForTransaction({ digest });
+      push({ ok: true, msg: "Yesterday finalized. Points awarded and the winner received a Trophy.", digest });
+      flash("Day finalized");
+      loadBoard();
+    } catch (e: any) {
+      flash("Nothing to finalize (no runs yesterday, or already finalized)");
+      push({ ok: false, msg: `Finalize failed: ${e?.message ?? e}` });
+    }
+    setBusy(false);
+  };
 
   // ---------- navigation ----------
   const open = (to: "board" | "ghost") => {
@@ -538,16 +582,34 @@ export default function Console() {
             <div className="ov dim">
               <div className="panel">
                 <div className="p-head"><h2>LEADERBOARD</h2><span>VERIFIED ON-CHAIN - TOP 10</span></div>
-                <div className="table">
-                  <div className="tr th"><span>RANK</span><span>PLAYER</span><span>SCORE</span></div>
-                  {board.length === 0 && <div className="tr empty"><span>{configured ? "No verified runs yet. Be the first." : "Contract not configured yet."}</span></div>}
-                  {board.map((b, i) => (
-                    <div key={i} className={`tr ${acct && String(b.player) === acct.address ? "me" : ""}`}>
-                      <span>{String(i + 1).padStart(2, "0")}</span><span>{short(String(b.player))}</span><span>{Number(b.score).toLocaleString()}</span>
-                    </div>
+                <div className="tabs">
+                  {(["all", "today", "season"] as Tab[]).map((t) => (
+                    <button key={t} className={`tab ${tab === t ? "on" : ""}`} onClick={() => { audio.click(); setTab(t); }}>
+                      {t === "all" ? "ALL-TIME" : t === "today" ? "TODAY" : "SEASON"}
+                    </button>
                   ))}
                 </div>
-                <div className="p-foot"><button className="mbtn" onClick={() => { audio.click(); setScreen(back); }}><b>BACK</b></button></div>
+                {(() => {
+                  const rows = tab === "all" ? board : tab === "today" ? dayRows : seasonRows;
+                  const unit = tab === "season" ? "POINTS" : "SCORE";
+                  const missing = tab === "all" ? !LEADERBOARD_ID : !REGISTRY_ID;
+                  return (
+                    <div className="table">
+                      <div className="tr th"><span>RANK</span><span>PLAYER</span><span>{unit}</span></div>
+                      {rows.length === 0 && <div className="tr empty"><span>{missing ? "Contract not configured yet." : tab === "season" ? "No points yet. Finalize a finished day to award them." : "No verified runs yet. Be the first."}</span></div>}
+                      {rows.map((b, i) => (
+                        <div key={i} className={`tr ${acct && String(b.player) === acct.address ? "me" : ""}`}>
+                          <span>{String(i + 1).padStart(2, "0")}</span><span>{short(String(b.player))}</span><span>{Number(b.score).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+                {tab === "today" && <p className="note note-in">Daily boards keep each player's best verified score. Winners of finished days earn season points (5 / 3 / 1) and a Trophy.</p>}
+                <div className="p-foot">
+                  <button className="mbtn" onClick={() => { audio.click(); setScreen(back); }}><b>BACK</b></button>
+                  {tab !== "all" && REGISTRY_ID && acct && <button className="mbtn warm" disabled={busy} onClick={finalizeYesterday}><b>FINALIZE YESTERDAY</b></button>}
+                </div>
               </div>
             </div>
           )}

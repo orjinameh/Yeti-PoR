@@ -53,3 +53,77 @@ fun daily_seed_vectors() {
     assert!(proof_of_run::daily_seed(20400) == 1689380583);
     assert!(proof_of_run::daily_seed(20775) == 670378286);
 }
+
+// ---- Daily board, season points, trophy ----
+// Idle log scores are deterministic per seed, so the claimed score is computed with replay().
+
+#[test_only]
+use sui::test_scenario as ts;
+#[test_only]
+use sui::clock;
+
+#[test]
+fun daily_finalize_awards_points_and_trophy() {
+    let a = @0xA;
+    let b = @0xB;
+    let day = 20000;
+    let mut sc = ts::begin(a);
+    proof_of_run::init_for_testing(sc.ctx());
+
+    // Both players claim a daily run; only A submits, so A is the sole entrant and wins.
+    sc.next_tx(a);
+    proof_of_run::daily_run_for_testing(day, sc.ctx());
+    sc.next_tx(b);
+    proof_of_run::daily_run_for_testing(day, sc.ctx());
+
+    let seed = proof_of_run::daily_seed(day);
+    let none: vector<u16> = vector[];
+
+    sc.next_tx(a);
+    {
+        let mut board = sc.take_shared<proof_of_run::Leaderboard>();
+        let mut reg = sc.take_shared<proof_of_run::Registry>();
+        let run = sc.take_from_sender<proof_of_run::Run>();
+        let score = proof_of_run::replay(seed, &none, &none);
+        proof_of_run::submit_for_testing(&mut board, &mut reg, run, copy none, copy none, score, sc.ctx());
+        ts::return_shared(board);
+        ts::return_shared(reg);
+    };
+
+    // Anyone (here B) can finalize once the day has ended.
+    sc.next_tx(b);
+    {
+        let mut reg = sc.take_shared<proof_of_run::Registry>();
+        let mut clk = clock::create_for_testing(sc.ctx());
+        clk.set_for_testing((day + 1) * 86400000);
+        proof_of_run::finalize_for_testing(&mut reg, &clk, day, sc.ctx());
+        clk.destroy_for_testing();
+        ts::return_shared(reg);
+    };
+
+    sc.next_tx(a);
+    {
+        let reg = sc.take_shared<proof_of_run::Registry>();
+        assert!(proof_of_run::season_points(&reg, a) == 5);
+        assert!(proof_of_run::season_points(&reg, b) == 0);
+        ts::return_shared(reg);
+        assert!(ts::has_most_recent_for_address<proof_of_run::Trophy>(a));
+    };
+    sc.end();
+}
+
+#[test, expected_failure(abort_code = 4)]
+fun finalize_open_day_rejected() {
+    let a = @0xA;
+    let day = 20000;
+    let mut sc = ts::begin(a);
+    proof_of_run::init_for_testing(sc.ctx());
+    sc.next_tx(a);
+    let mut reg = sc.take_shared<proof_of_run::Registry>();
+    let mut clk = clock::create_for_testing(sc.ctx());
+    clk.set_for_testing(day * 86400000 + 5);
+    proof_of_run::finalize_for_testing(&mut reg, &clk, day, sc.ctx());
+    clk.destroy_for_testing();
+    ts::return_shared(reg);
+    sc.end();
+}
