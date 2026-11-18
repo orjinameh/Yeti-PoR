@@ -1,0 +1,6 @@
+[package]
+name = "proof_of_run"
+edition = "2024.beta"
+
+[addresses]
+proof_of_run = "0x0"
