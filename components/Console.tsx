@@ -188,17 +188,28 @@ export default function Console() {
         else tx.moveCall({ target: `${PACKAGE_ID}::${MODULE}::start_run`, arguments: [tx.object(RANDOM_ID)] });
         const { digest } = await signAndExec({ transaction: tx as any });
         setLoadMsg("WAITING FOR THE CHAIN");
-        const r = await client.waitForTransaction({ digest, options: { showObjectChanges: true } });
+        const r = await client.waitForTransaction({ digest, options: { showObjectChanges: true, showEffects: true } });
+        if (r.effects?.status.status !== "success") throw new Error(`Transaction failed on-chain: ${r.effects?.status.error ?? "unknown error"}`);
         const created: any = r.objectChanges?.find((c: any) => c.type === "created" && c.objectType.endsWith(`::${MODULE}::Run`));
-        const obj = await client.getObject({ id: created.objectId, options: { showContent: true } });
-        const seed = BigInt((obj.data?.content as any).fields.seed);
+        if (!created) throw new Error(`Run object not found in the transaction. Check NEXT_PUBLIC_PACKAGE_ID matches the published package.`);
+        // the fullnode can lag a moment behind the wallet's node, so retry the read
+        let obj: any = null;
+        for (let i = 0; i < 6; i++) {
+          obj = await client.getObject({ id: created.objectId, options: { showContent: true } });
+          if (obj?.data?.content) break;
+          await new Promise((res) => setTimeout(res, 600));
+        }
+        if (!obj?.data?.content) throw new Error("Run object was created but could not be read yet. Try again.");
+        const seed = BigInt((obj.data.content as any).fields.seed);
         newSession(seed, m === "daily" ? `VERIFIED DAILY - DAY ${d}` : "VERIFIED RUN", created.objectId, true);
         push({ ok: true, msg: m === "daily" ? "Daily run started. Seed derived on-chain from the date." : "Run started. Seed from sui::random.", digest });
         setLoadMsg("SEED LOCKED");
         await fill(900, 0.12);
       } catch (e: any) {
-        push({ ok: false, msg: `Could not start a verified run: ${e?.message ?? e}` });
-        flash("Verified run cancelled");
+        const msg = String(e?.message ?? e);
+        const rejected = /reject|denied|declin|cancel|closed/i.test(msg);
+        push({ ok: false, msg: rejected ? "Wallet request was rejected or closed." : `Could not start a verified run: ${msg}` });
+        flash(rejected ? "Verified run cancelled" : "Verified run failed - see log");
         setScreen("title");
         return;
       }
