@@ -527,6 +527,9 @@ export default function Console() {
                   <span className="chip">BEST <b>{best ? best.score : "-"}</b></span>
                   {session?.ghost && <span className="chip ghost">GHOST READY</span>}
                 </div>
+                {log[0] && !log[0].ok && (
+                  <div className="status bad" style={{ marginTop: 10, wordBreak: "break-word", userSelect: "text" }}>{log[0].msg}</div>
+                )}
               </div>
               <nav className="t-menu">
                 <button className="mbtn primary" onClick={() => launch(false)}><b>RUN</b><small>Practice. Free, no wallet.</small></button>
