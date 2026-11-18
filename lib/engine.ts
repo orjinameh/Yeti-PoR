@@ -1,23 +1,59 @@
-// Deterministic fixed-point runner engine. MUST stay identical to move/sources/proof_of_run.move.
+// Deterministic fixed-point runner engine v2. MUST stay identical to move/sources/proof_of_run.move.
+//
+// Story: Subject Y-7 (the yeti) escapes Halcyon Station. 600 ticks (60s), 4 stages of 150 ticks.
+// Inputs: a log of jump ticks and a log of shot ticks. Shots are hitscan auto-aim (no projectile sim).
+//
+// Obstacle kinds (one active at a time, spaced >= 16 ticks apart, each overlapping the player for 3 ticks):
+//   0 crate  - hurts you if you are on the ground. Can't be shot. Jump it.
+//   1 sentry - ground enemy, 2 hp. Hurts you if you are on the ground. Jump it or shoot it.
+//   2 drone  - air enemy, 1 hp. Hurts you if you are airborne. Stay low or shoot it.
 export const TICKS = 600;
 export const TPS = 10;
+export const STAGE_TICKS = 150;
 export const PROFILE = [9, 16, 22, 27, 30, 31, 31, 30, 27, 22, 16, 9];
+export const HP_MAX = 5;
+export const INV_TICKS = 6;
+export const SHOT_CD = 3;
+export const RANGE = 12;
 const M = 2147483648n;
+
+const nextR = (r: bigint): bigint => (r * 1103515245n + 12345n) % M;
+const drawR = (r: bigint): number => Number((r >> 16n) % 10n);
+const rollR = (r: bigint): number => Number((r >> 8n) % 100n);
+
+export function kindFor(roll: number, start: number): number {
+  const stage = Math.min(3, Math.floor(start / STAGE_TICKS));
+  if (stage === 0) return roll < 70 ? 0 : 1;
+  if (stage === 1) return roll < 35 ? 0 : roll < 80 ? 1 : 2;
+  if (stage === 2) return roll < 25 ? 0 : roll < 55 ? 1 : 2;
+  return roll < 20 ? 0 : roll < 50 ? 1 : 2;
+}
+export const hpFor = (kind: number): number => (kind === 1 ? 2 : kind === 2 ? 1 : 0);
+export const stageOf = (tick: number): number => Math.min(3, Math.floor(tick / STAGE_TICKS));
+
+export type StepEvents = { fired: boolean; hitEnemy: boolean; killed: boolean; damaged: boolean };
+export type Upcoming = { start: number; kind: number; ehp: number };
 
 export class Sim {
   rng: bigint;
-  start: number; // first tick of next obstacle (spans start..start+2)
+  start: number; // first tick of the active obstacle (spans start..start+2)
+  kind: number;
+  ehp: number; // enemy hp left (kinds 1, 2)
   tick = 0;
   air = 0;
   passed = 0;
+  kills = 0;
+  hp = HP_MAX;
+  inv = 0;
+  cd = 0;
   dead = false;
+  ev: StepEvents = { fired: false, hitEnemy: false, killed: false, damaged: false };
+
   constructor(seed: bigint) {
-    this.rng = seed % M;
-    this.start = 20 + this.draw();
-  }
-  private draw(): number {
-    this.rng = (this.rng * 1103515245n + 12345n) % M;
-    return Number((this.rng >> 16n) % 10n);
+    this.rng = nextR(seed % M);
+    this.start = 20 + drawR(this.rng);
+    this.kind = kindFor(rollR(this.rng), this.start);
+    this.ehp = hpFor(this.kind);
   }
   height(): number {
     return this.air === 0 ? 0 : PROFILE[this.air - 1];
@@ -25,32 +61,71 @@ export class Sim {
   get over(): boolean {
     return this.dead || this.tick >= TICKS;
   }
-  get score(): number {
-    return this.passed * 100 + this.tick;
+  get escaped(): boolean {
+    return !this.dead && this.tick >= TICKS;
   }
-  /** upcoming obstacle start ticks (does not mutate state) */
-  upcoming(n: number): number[] {
-    const out = [this.start];
+  get score(): number {
+    return this.passed * 100 + this.tick + this.kills * 50 + (this.escaped ? this.hp * 50 : 0);
+  }
+  /** can a shot taken this tick actually fire? */
+  canShoot(): boolean {
+    return this.cd <= 1;
+  }
+  /** is there an enemy the auto-aim would hit right now? */
+  hasTarget(): boolean {
+    return this.kind > 0 && this.ehp > 0 && this.tick <= this.start + 2 && this.start <= this.tick + RANGE;
+  }
+  /** upcoming obstacles (does not mutate state) */
+  upcoming(n: number): Upcoming[] {
+    const out: Upcoming[] = [{ start: this.start, kind: this.kind, ehp: this.ehp }];
     let r = this.rng;
     let s = this.start;
     while (out.length < n) {
-      r = (r * 1103515245n + 12345n) % M;
-      s = s + 16 + Number((r >> 16n) % 10n);
-      out.push(s);
+      r = nextR(r);
+      s = s + 16 + drawR(r);
+      const k = kindFor(rollR(r), s);
+      out.push({ start: s, kind: k, ehp: hpFor(k) });
     }
     return out;
   }
-  step(jump: boolean): void {
+  step(jump: boolean, shoot: boolean): void {
     if (this.over) return;
+    this.ev = { fired: false, hitEnemy: false, killed: false, damaged: false };
     if (jump && this.air === 0) this.air = 1;
+    if (this.cd > 0) this.cd -= 1;
+    if (shoot && this.cd === 0) {
+      this.cd = SHOT_CD;
+      this.ev.fired = true;
+      if (this.kind > 0 && this.ehp > 0 && this.tick <= this.start + 2 && this.start <= this.tick + RANGE) {
+        this.ehp -= 1;
+        this.ev.hitEnemy = true;
+        if (this.ehp === 0) {
+          this.kills += 1;
+          this.ev.killed = true;
+        }
+      }
+    }
     const h = this.height();
-    if (this.tick >= this.start && this.tick <= this.start + 2 && h < 3) {
-      this.dead = true;
-      return;
+    if (this.inv > 0) this.inv -= 1;
+    if (this.tick >= this.start && this.tick <= this.start + 2 && this.inv === 0) {
+      const danger =
+        this.kind === 0 ? h < 3 : this.ehp === 0 ? false : this.kind === 1 ? h < 3 : h >= 3;
+      if (danger) {
+        this.hp -= 1;
+        this.inv = INV_TICKS;
+        this.ev.damaged = true;
+        if (this.hp === 0) {
+          this.dead = true;
+          return;
+        }
+      }
     }
     if (this.tick === this.start + 2) {
       this.passed += 1;
-      this.start = this.start + 16 + this.draw();
+      this.rng = nextR(this.rng);
+      this.start = this.start + 16 + drawR(this.rng);
+      this.kind = kindFor(rollR(this.rng), this.start);
+      this.ehp = hpFor(this.kind);
     }
     if (this.air > 0) {
       this.air += 1;
@@ -60,28 +135,40 @@ export class Sim {
   }
 }
 
-export function replay(seed: bigint, jumps: number[]): number {
-  for (let i = 0; i < jumps.length; i++) {
-    if (jumps[i] < 0 || jumps[i] >= TICKS || (i > 0 && jumps[i] <= jumps[i - 1])) throw new Error("bad log");
+function checkLog(log: number[]): void {
+  if (log.length > TICKS) throw new Error("bad log");
+  for (let i = 0; i < log.length; i++) {
+    if (log[i] < 0 || log[i] >= TICKS || (i > 0 && log[i] <= log[i - 1])) throw new Error("bad log");
   }
+}
+
+export function replay(seed: bigint, jumps: number[], shots: number[]): number {
+  checkLog(jumps);
+  checkLog(shots);
   const s = new Sim(seed);
-  let idx = 0;
+  let ji = 0;
+  let si = 0;
   while (!s.over) {
-    const j = idx < jumps.length && jumps[idx] === s.tick;
-    if (j) idx++;
-    s.step(j);
+    const j = ji < jumps.length && jumps[ji] === s.tick;
+    if (j) ji++;
+    const f = si < shots.length && shots[si] === s.tick;
+    if (f) si++;
+    s.step(j, f);
   }
   return s.score;
 }
 
-/** perfect bot: jumps one tick before every obstacle (used for test vectors) */
-export function botLog(seed: bigint): number[] {
+/** reference bot (used for test vectors): jumps crates, shoots sentries and drones as soon as they are in range */
+export function botLog(seed: bigint): { jumps: number[]; shots: number[] } {
   const s = new Sim(seed);
-  const log: number[] = [];
+  const jumps: number[] = [];
+  const shots: number[] = [];
   while (!s.over) {
-    const j = s.tick === s.start - 1;
-    if (j) log.push(s.tick);
-    s.step(j);
+    const j = s.kind === 0 && s.tick === s.start - 1;
+    const f = s.hasTarget() && s.canShoot();
+    if (j) jumps.push(s.tick);
+    if (f) shots.push(s.tick);
+    s.step(j, f);
   }
-  return log;
+  return { jumps, shots };
 }

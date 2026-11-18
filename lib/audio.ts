@@ -23,15 +23,22 @@ class YetiAudio {
   private timer: ReturnType<typeof setInterval> | null = null;
   private nextTime = 0;
   private step = 0;
-  muted = false;
+  sfxMuted = false;
+  musicMuted = false;
 
   constructor() {
     try {
-      this.muted = typeof localStorage !== "undefined" && localStorage.getItem("yeti:muted") === "1";
+      if (typeof localStorage !== "undefined") {
+        this.sfxMuted = localStorage.getItem("yeti:sfx") === "0";
+        this.musicMuted = localStorage.getItem("yeti:music") === "0";
+      }
     } catch {
       /* ignore */
     }
   }
+
+  get musicPlaying(): boolean { return this.timer !== null; }
+  private musicLevel(): number { return this.musicMuted ? 0 : 0.55; }
 
   unlock(): void {
     if (!this.ctx) {
@@ -40,16 +47,16 @@ class YetiAudio {
       const ctx: AudioContext = new AC();
       this.ctx = ctx;
       this.master = ctx.createGain();
-      this.master.gain.value = this.muted ? 0 : 0.9;
+      this.master.gain.value = 0.9;
       const lp = ctx.createBiquadFilter();
       lp.type = "lowpass";
       lp.frequency.value = 5200;
       this.master.connect(lp).connect(ctx.destination);
       this.musicBus = ctx.createGain();
-      this.musicBus.gain.value = 0.55;
+      this.musicBus.gain.value = this.musicLevel();
       this.musicBus.connect(this.master);
       this.sfxBus = ctx.createGain();
-      this.sfxBus.gain.value = 0.8;
+      this.sfxBus.gain.value = this.sfxMuted ? 0 : 0.8;
       this.sfxBus.connect(this.master);
       const len = ctx.sampleRate;
       this.noise = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -59,14 +66,16 @@ class YetiAudio {
     if (this.ctx.state === "suspended") void this.ctx.resume();
   }
 
-  setMuted(m: boolean): void {
-    this.muted = m;
-    try {
-      localStorage.setItem("yeti:muted", m ? "1" : "0");
-    } catch {
-      /* ignore */
-    }
-    if (this.ctx) this.master.gain.setTargetAtTime(m ? 0 : 0.9, this.ctx.currentTime, 0.05);
+  setSfxMuted(m: boolean): void {
+    this.sfxMuted = m;
+    try { localStorage.setItem("yeti:sfx", m ? "0" : "1"); } catch { /* ignore */ }
+    if (this.ctx) this.sfxBus.gain.setTargetAtTime(m ? 0 : 0.8, this.ctx.currentTime, 0.03);
+  }
+
+  setMusicMuted(m: boolean): void {
+    this.musicMuted = m;
+    try { localStorage.setItem("yeti:music", m ? "0" : "1"); } catch { /* ignore */ }
+    if (this.ctx && this.timer) this.musicBus.gain.setTargetAtTime(this.musicLevel(), this.ctx.currentTime, 0.05);
   }
 
   // ---------- music ----------
@@ -75,7 +84,7 @@ class YetiAudio {
     this.nextTime = this.ctx.currentTime + 0.08;
     this.step = 0;
     this.musicBus.gain.cancelScheduledValues(this.ctx.currentTime);
-    this.musicBus.gain.setTargetAtTime(0.55, this.ctx.currentTime, 0.1);
+    this.musicBus.gain.setTargetAtTime(this.musicLevel(), this.ctx.currentTime, 0.1);
     this.timer = setInterval(() => {
       if (!this.ctx) return;
       while (this.nextTime < this.ctx.currentTime + 0.2) {
@@ -193,6 +202,16 @@ class YetiAudio {
     this.sweep("sawtooth", 360, 55, 0.5, 0.2);
     if (this.ctx) this.noiseHit(this.ctx.currentTime, 0.3, 0.2, 400, this.sfxBus);
   }
+  click(): void { this.sweep("triangle", 700, 520, 0.05, 0.08); }
+  blip(go: boolean): void { this.sweep("square", go ? 880 : 440, go ? 880 : 440, go ? 0.22 : 0.1, 0.1); }
+  shoot(): void { this.sweep("sine", 1400, 500, 0.11, 0.13); this.sweep("triangle", 2100, 900, 0.07, 0.05); }
+  hit(): void { this.sweep("square", 220, 140, 0.06, 0.06); }
+  hurt(): void { this.sweep("sawtooth", 200, 70, 0.22, 0.18); if (this.ctx) this.noiseHit(this.ctx.currentTime, 0.12, 0.14, 600, this.sfxBus); }
+  boom(): void {
+    this.sweep("sawtooth", 180, 40, 0.3, 0.16);
+    if (this.ctx) this.noiseHit(this.ctx.currentTime, 0.28, 0.2, 300, this.sfxBus);
+  }
+  stage(): void { [392, 523, 659].forEach((f, i) => this.sweep("triangle", f, f, 0.18, 0.1, i * 0.08)); }
   win(): void { [523, 659, 784, 1047].forEach((f, i) => this.sweep("triangle", f, f, 0.22, 0.14, i * 0.1)); }
 }
 

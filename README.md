@@ -20,12 +20,23 @@ Honest limit: this proves a score is consistent with a legal input log, not that
 - `sui::random` rules: `start_run` is a non-public `entry` taking `&Random` (0x8); keep it that way.
 - Forge it: wallets dry-run first, so the abort may show before signing. For the on-chain explorer proof, set a manual gas budget or execute via CLI: `sui client call --package <PKG> --module proof_of_run --function submit_run --args <BOARD> <RUN> "[1,2]" 9999 --gas-budget 50000000`.
 
-## v2: polish + competitive edition
-- `lib/art.ts` original vector yeti, parallax mountains, snow, ice crystals (no asset files). `lib/audio.ts` procedural lo-fi music + sfx (WebAudio, mute toggle). Replace either with real art/audio any time; the engine is untouched.
-- **Daily Yeti Challenge**: `start_daily_run(clock)` derives the seed from the UTC day (`daily_seed` in Move == `dailySeed` in `lib/daily.ts`). Everyone plays the same course.
-- **Ghost racing**: best run per seed is stored locally and replays as a ghost. Share with a `YG1:<seed>:<jumps>` code; the score is recomputed on import.
-- Run and `Receipt` now carry `day` (0 = free run). This changes struct layout, so **publish a fresh package** and update `.env.local`.
-- Visual hitboxes match the engine (airborne min height 38px > crystal 36px; overlap window = 3 ticks).
+## v3: Escape from Halcyon (handheld edition)
+The game is presented as a handheld console: a left rail (sound and music keys, jump pad, pause), the screen, and a right rail (fire pad, leaderboard). Boot splash, loading bar, press start, story intro, title menu, a loading screen before every run, a 3-2-1 countdown, pause, result, leaderboard and ghost screens. No emojis anywhere.
 
-## Next (not built yet)
-Per-day on-chain leaderboard, season points, and verified-winner trophy NFTs. Ghosts from other players need the winning jump log stored on-chain (or in an indexer).
+Story: Subject Y-7, a yeti held at Halcyon Station, escapes when the cell lock fails. 4 stages of 150 ticks: Cell Block, Lab Corridor, Cargo Bay, The Breakout.
+
+Gameplay (same rules in `lib/engine.ts` and `move/sources/proof_of_run.move`):
+- Crates: jump them. Sentries (2 hp, ground): jump or shoot. Drones (1 hp, air): stay low or shoot.
+- 5 health, short invulnerability after a hit. Score = gates passed x 100 + ticks survived + takedowns x 50 + health left x 50 if you escape.
+- Inputs logged: jump ticks and shot ticks. Hold-to-fire auto-aims the nearest enemy in range.
+
+Controls: Jump = Space / Up / W or the left pad. Fire = hold F / J / K / Right or the right pad. Pause = Esc / P.
+
+Code map: `lib/runner.ts` (sim loop, rendering, input API), `lib/art.ts` (all art), `lib/sprites.ts` (drop-in sprite sheet, see `public/sprites/README.md`), `lib/audio.ts` (procedural music and sfx), `components/Console.tsx` (shell and screens), `components/Game.tsx` (thin canvas wrapper).
+
+Daily challenge: `start_daily_run(clock)` derives the seed from the UTC day. Ghost racing: your best run per seed replays as a ghost; share a `YG2:<seed>:<jumps>:<shots>` code, the score is recomputed on import.
+
+The `Run`, `Receipt`, `submit_run` and replay signatures changed, so publish a fresh package and update `.env.local`.
+
+## Not built yet
+Per-day on-chain leaderboard, season points, verified-winner trophy NFTs, ghosts from other players (needs winning input logs stored on-chain or in an indexer).
