@@ -56,7 +56,11 @@ function Key({ label, onClick, disabled, active, children }: { label: string; on
 export default function Console() {
   const acct = useCurrentAccount();
   const client = useSuiClient();
-  const { mutateAsync: signAndExec } = useSignAndExecuteTransaction();
+  // Re-sending an already signed transaction is idempotent (same digest), so a dropped request ("Load failed") is safe to retry.
+  const { mutateAsync: signAndExec } = useSignAndExecuteTransaction({
+    execute: async ({ bytes, signature }) =>
+      await retry(() => client.executeTransactionBlock({ transactionBlock: bytes, signature, options: { showRawEffects: true, showObjectChanges: true, showEffects: true } })),
+  });
   const { mutate: disconnect } = useDisconnectWallet();
 
   const [isMobile, setIsMobile] = useState(false);
