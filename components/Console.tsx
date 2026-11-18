@@ -22,6 +22,14 @@ type Tab = "all" | "today" | "season";
 
 const explorer = (d: string) => `https://suiscan.xyz/testnet/tx/${d}`;
 const short = (a: string) => `${a.slice(0, 6)}...${a.slice(-4)}`;
+// public fullnodes rate-limit and Safari reports that as "Load failed", so retry reads with backoff
+async function retry<T>(fn: () => Promise<T>, tries = 6, ms = 700): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < tries; i++) {
+    try { return await fn(); } catch (e) { last = e; await new Promise((r) => setTimeout(r, ms * (i + 1))); }
+  }
+  throw last;
+}
 const TIPS = [
   "Hold FIRE to auto-aim. Shots have a short cooldown.",
   "Crates cannot be shot. Jump them.",
@@ -182,20 +190,24 @@ export default function Console() {
     if (verified) {
       setLoadMsg("CONFIRM THE TRANSACTION IN YOUR WALLET");
       setLoadPct(0.12);
+      let step = "building transaction";
       try {
         const tx = new Transaction();
         if (m === "daily") tx.moveCall({ target: `${PACKAGE_ID}::${MODULE}::start_daily_run`, arguments: [tx.object(CLOCK_ID)] });
         else tx.moveCall({ target: `${PACKAGE_ID}::${MODULE}::start_run`, arguments: [tx.object(RANDOM_ID)] });
+        step = "wallet signing";
         const { digest } = await signAndExec({ transaction: tx as any });
         setLoadMsg("WAITING FOR THE CHAIN");
-        const r = await client.waitForTransaction({ digest, options: { showObjectChanges: true, showEffects: true } });
+        step = "confirming transaction";
+        const r = await retry(() => client.waitForTransaction({ digest, timeout: 30000, pollInterval: 1000, options: { showObjectChanges: true, showEffects: true } }));
         if (r.effects?.status.status !== "success") throw new Error(`Transaction failed on-chain: ${r.effects?.status.error ?? "unknown error"}`);
         const created: any = r.objectChanges?.find((c: any) => c.type === "created" && c.objectType.endsWith(`::${MODULE}::Run`));
         if (!created) throw new Error(`Run object not found in the transaction. Check NEXT_PUBLIC_PACKAGE_ID matches the published package.`);
         // the fullnode can lag a moment behind the wallet's node, so retry the read
+        step = "reading the new run";
         let obj: any = null;
         for (let i = 0; i < 6; i++) {
-          obj = await client.getObject({ id: created.objectId, options: { showContent: true } });
+          obj = await retry(() => client.getObject({ id: created.objectId, options: { showContent: true } }));
           if (obj?.data?.content) break;
           await new Promise((res) => setTimeout(res, 600));
         }
@@ -208,7 +220,8 @@ export default function Console() {
       } catch (e: any) {
         const msg = String(e?.message ?? e);
         const rejected = /reject|denied|declin|cancel|closed/i.test(msg);
-        push({ ok: false, msg: rejected ? "Wallet request was rejected or closed." : `Could not start a verified run: ${msg}` });
+        const net = /load failed|failed to fetch|networkerror|429|timeout/i.test(msg);
+        push({ ok: false, msg: rejected ? "Wallet request was rejected or closed." : `Could not start a verified run (${step}): ${msg}${net ? ". Network/RPC problem, your transaction may have gone through. Check your wallet activity, then try again." : ""}` });
         flash(rejected ? "Verified run cancelled" : "Verified run failed - see log");
         setScreen("title");
         return;

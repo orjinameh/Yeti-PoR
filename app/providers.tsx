@@ -5,7 +5,8 @@ import { SuiClientProvider, WalletProvider } from "@mysten/dapp-kit";
 import { getFullnodeUrl } from "@mysten/sui/client";
 import "@mysten/dapp-kit/dist/index.css";
 
-const networks = { testnet: { url: getFullnodeUrl("testnet") } };
+// set NEXT_PUBLIC_SUI_RPC_URL to a dedicated testnet RPC if the public fullnode rate-limits you
+const networks = { testnet: { url: process.env.NEXT_PUBLIC_SUI_RPC_URL || getFullnodeUrl("testnet") } };
 
 export default function Providers({ children }: { children: ReactNode }) {
   const [qc] = useState(() => new QueryClient());
