@@ -1,9 +1,20 @@
 import type { ReactNode } from "react";
-export const metadata = { title: "Yeti Proof-of-Run", description: "A Lofi Yeti runner whose score is replay-verified in Move on Sui." };
+import "./globals.css";
+
+export const metadata = {
+  title: "Yeti Proof-of-Run",
+  description: "A yeti runner whose score is replay-verified in Move on Sui. Daily challenge + ghost racing.",
+};
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body style={{ margin: 0, background: "#0b1020", color: "#e8f0ff", fontFamily: "system-ui, sans-serif" }}>{children}</body>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Press+Start+2P&display=swap" rel="stylesheet" />
+      </head>
+      <body>{children}</body>
     </html>
   );
 }

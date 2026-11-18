@@ -2,6 +2,7 @@
 /// The physics below MUST stay identical to lib/engine.ts (integer-only, no signed math).
 module proof_of_run::proof_of_run;
 
+use sui::clock::Clock;
 use sui::random::{Self, Random};
 
 const TICKS: u64 = 600;
@@ -11,9 +12,9 @@ const E_SCORE_MISMATCH: u64 = 2;
 
 const PROFILE: vector<u64> = vector[9, 16, 22, 27, 30, 31, 31, 30, 27, 22, 16, 9];
 
-public struct Run has key { id: UID, seed: u64 }
+public struct Run has key { id: UID, seed: u64, day: u64 }
 
-public struct Receipt has key, store { id: UID, seed: u64, score: u64 }
+public struct Receipt has key, store { id: UID, seed: u64, score: u64, day: u64 }
 
 public struct Entry has copy, drop, store { player: address, score: u64 }
 
@@ -22,6 +23,9 @@ public struct Leaderboard has key { id: UID, entries: vector<Entry> }
 fun init(ctx: &mut TxContext) {
     transfer::share_object(Leaderboard { id: object::new(ctx), entries: vector[] });
 }
+
+/// Daily challenge seed. MUST match dailySeed() in lib/daily.ts.
+public fun daily_seed(day: u64): u64 { (day * 2654435761 + 40503) % 2147483648 }
 
 fun next(rng: u64): u64 { (rng * 1103515245 + 12345) % 2147483648 }
 
@@ -77,7 +81,13 @@ public fun replay(seed: u64, jumps: &vector<u16>): u64 {
 entry fun start_run(r: &Random, ctx: &mut TxContext) {
     let mut g = random::new_generator(r, ctx);
     let seed = (random::generate_u32(&mut g) as u64);
-    transfer::transfer(Run { id: object::new(ctx), seed }, ctx.sender());
+    transfer::transfer(Run { id: object::new(ctx), seed, day: 0 }, ctx.sender());
+}
+
+/// Everyone who calls this on the same UTC day gets the same seed, so scores are directly comparable.
+entry fun start_daily_run(clock: &Clock, ctx: &mut TxContext) {
+    let day = clock.timestamp_ms() / 86400000;
+    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day }, ctx.sender());
 }
 
 /// Replays the log, requires the claimed score to match, records it, mints a receipt.
@@ -89,7 +99,7 @@ entry fun submit_run(
     claimed_score: u64,
     ctx: &mut TxContext,
 ) {
-    let Run { id, seed } = run;
+    let Run { id, seed, day } = run;
     id.delete();
     let score = replay(seed, &jumps);
     assert!(score == claimed_score, E_SCORE_MISMATCH);
@@ -102,7 +112,7 @@ entry fun submit_run(
     };
     if (board.entries.length() > MAX_ENTRIES) { board.entries.pop_back(); };
 
-    transfer::public_transfer(Receipt { id: object::new(ctx), seed, score }, ctx.sender());
+    transfer::public_transfer(Receipt { id: object::new(ctx), seed, score, day }, ctx.sender());
 }
 
 #[test_only]

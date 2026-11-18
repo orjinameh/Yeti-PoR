@@ -19,4 +19,13 @@ Honest limit: this proves a score is consistent with a legal input log, not that
 - Replay gas for 600 ticks: if too high, lower TICKS or chunk verification across transactions.
 - `sui::random` rules: `start_run` is a non-public `entry` taking `&Random` (0x8); keep it that way.
 - Forge it: wallets dry-run first, so the abort may show before signing. For the on-chain explorer proof, set a manual gas budget or execute via CLI: `sui client call --package <PKG> --module proof_of_run --function submit_run --args <BOARD> <RUN> "[1,2]" 9999 --gas-budget 50000000`.
-- Art/polish: the canvas uses placeholder shapes; swap in the official Lofi assets or an original yeti sprite sheet.
+
+## v2: polish + competitive edition
+- `lib/art.ts` original vector yeti, parallax mountains, snow, ice crystals (no asset files). `lib/audio.ts` procedural lo-fi music + sfx (WebAudio, mute toggle). Replace either with real art/audio any time; the engine is untouched.
+- **Daily Yeti Challenge**: `start_daily_run(clock)` derives the seed from the UTC day (`daily_seed` in Move == `dailySeed` in `lib/daily.ts`). Everyone plays the same course.
+- **Ghost racing**: best run per seed is stored locally and replays as a ghost. Share with a `YG1:<seed>:<jumps>` code; the score is recomputed on import.
+- Run and `Receipt` now carry `day` (0 = free run). This changes struct layout, so **publish a fresh package** and update `.env.local`.
+- Visual hitboxes match the engine (airborne min height 38px > crystal 36px; overlap window = 3 ticks).
+
+## Next (not built yet)
+Per-day on-chain leaderboard, season points, and verified-winner trophy NFTs. Ghosts from other players need the winning jump log stored on-chain (or in an indexer).

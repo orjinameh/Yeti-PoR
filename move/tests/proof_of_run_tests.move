@@ -27,3 +27,11 @@ fun unsorted_log_rejected() {
     let jumps: vector<u16> = vector[30, 10];
     proof_of_run::replay(42, &jumps);
 }
+
+// Daily seeds generated from lib/daily.ts (dailySeed). Both sides must agree.
+#[test]
+fun daily_seed_vectors() {
+    assert!(proof_of_run::daily_seed(0) == 40503);
+    assert!(proof_of_run::daily_seed(20400) == 1689380583);
+    assert!(proof_of_run::daily_seed(20775) == 670378286);
+}
