@@ -12,7 +12,9 @@ export default function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={qc}>
       <SuiClientProvider networks={networks} defaultNetwork="testnet">
-        <WalletProvider autoConnect>{children}</WalletProvider>
+        {/* slushWallet adds the Slush web wallet (works in a phone browser, no extension needed).
+            Spread via any so an older dapp-kit that lacks the prop cannot break the build. */}
+        <WalletProvider autoConnect {...({ slushWallet: { name: "Yeti Proof-of-Run" } } as any)}>{children}</WalletProvider>
       </SuiClientProvider>
     </QueryClientProvider>
   );

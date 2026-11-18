@@ -6,8 +6,8 @@ use sui::clock::Clock;
 use sui::random::{Self, Random};
 use sui::table::{Self, Table};
 
-const TICKS: u64 = 600;
-const STAGE_TICKS: u64 = 150;
+const TICKS: u64 = 1800;
+const STAGE_TICKS: u64 = 450;
 const MAX_ENTRIES: u64 = 10;
 const HP_MAX: u64 = 5;
 const INV_TICKS: u64 = 6;
@@ -18,7 +18,20 @@ const E_SCORE_MISMATCH: u64 = 2;
 const E_DAY_FINALIZED: u64 = 3;
 const E_DAY_OPEN: u64 = 4;
 const E_NO_DAY: u64 = 5;
+const E_POINTS: u64 = 6;
+const E_SOLD_OUT: u64 = 7;
+const E_NOT_FOR_SALE: u64 = 8;
+const E_BAD_KIND: u64 = 9;
 const DAY_MS: u64 = 86400000;
+
+// Cosmetic kinds: 0 Ice Shard (common), 1 Frozen Helm (rare), 2 Glacier Armor (epic), 3 Eternal Crown (legendary).
+// Kinds 0-2 can be bought with reward points; kind 3 is only granted (season winners, events, tournaments).
+const COST_SHARD: u64 = 5;
+const COST_HELM: u64 = 25;
+const COST_ARMOR: u64 = 60;
+const CAP_HELM: u64 = 5000;
+const CAP_ARMOR: u64 = 1000;
+const CAP_CROWN: u64 = 100;
 
 const PROFILE: vector<u64> = vector[9, 16, 22, 27, 30, 31, 31, 30, 27, 22, 16, 9];
 
@@ -34,14 +47,35 @@ public struct Leaderboard has key { id: UID, entries: vector<Entry> }
 /// One top-10 per UTC day (best score per player) plus season points per player.
 public struct DayBoard has store { entries: vector<Entry>, finalized: bool }
 
-public struct Registry has key { id: UID, days: Table<u64, DayBoard>, season: Table<address, u64> }
+/// Reward points are earned once per UTC day per player (first verified daily run), which stops farming.
+public struct Profile has store { points: u64, last_day: u64, streak: u64 }
+
+public struct Registry has key {
+    id: UID,
+    days: Table<u64, DayBoard>,
+    season: Table<address, u64>,
+    profiles: Table<address, Profile>,
+    minted: Table<u8, u64>,
+}
+
+/// Held by the publisher. Needed to grant limited cosmetics (season prizes, events, tournaments).
+public struct AdminCap has key, store { id: UID }
+
+public struct Cosmetic has key, store { id: UID, kind: u8, season: u64, serial: u64 }
 
 /// Minted to the verified winner of a finished daily challenge.
 public struct Trophy has key, store { id: UID, day: u64, seed: u64, score: u64 }
 
 fun init(ctx: &mut TxContext) {
     transfer::share_object(Leaderboard { id: object::new(ctx), entries: vector[] });
-    transfer::share_object(Registry { id: object::new(ctx), days: table::new(ctx), season: table::new(ctx) });
+    transfer::share_object(Registry {
+        id: object::new(ctx),
+        days: table::new(ctx),
+        season: table::new(ctx),
+        profiles: table::new(ctx),
+        minted: table::new(ctx),
+    });
+    transfer::public_transfer(AdminCap { id: object::new(ctx) }, ctx.sender());
 }
 
 fun sort_desc(v: &mut vector<Entry>) {
@@ -89,6 +123,48 @@ fun add_points(reg: &mut Registry, player: address, pts: u64) {
     } else {
         reg.season.add(player, pts);
     };
+}
+
+fun award_daily(reg: &mut Registry, player: address, day: u64, alive: bool) {
+    if (!reg.profiles.contains(player)) {
+        reg.profiles.add(player, Profile { points: 0, last_day: 0, streak: 0 });
+    };
+    let p = reg.profiles.borrow_mut(player);
+    if (p.last_day == day) return; // already rewarded today
+    p.streak = if (p.last_day + 1 == day) p.streak + 1 else 1;
+    p.last_day = day;
+    let mut pts = 1u64;
+    if (alive) pts = pts + 2;
+    if (p.streak % 5 == 0) pts = pts + 5;
+    p.points = p.points + pts;
+}
+
+fun mint_cosmetic(reg: &mut Registry, kind: u8, season: u64, to: address, ctx: &mut TxContext) {
+    assert!(kind <= 3, E_BAD_KIND);
+    let cap = if (kind == 1) CAP_HELM else if (kind == 2) CAP_ARMOR else if (kind == 3) CAP_CROWN else 0;
+    if (!reg.minted.contains(kind)) reg.minted.add(kind, 0);
+    let m = reg.minted.borrow_mut(kind);
+    assert!(cap == 0 || *m < cap, E_SOLD_OUT);
+    *m = *m + 1;
+    let serial = *m;
+    transfer::public_transfer(Cosmetic { id: object::new(ctx), kind, season, serial }, to);
+}
+
+/// Spend reward points on a cosmetic (kinds 0-2). Limited kinds have a hard supply cap.
+entry fun redeem(reg: &mut Registry, kind: u8, ctx: &mut TxContext) {
+    assert!(kind <= 2, E_NOT_FOR_SALE);
+    let cost = if (kind == 0) COST_SHARD else if (kind == 1) COST_HELM else COST_ARMOR;
+    let who = ctx.sender();
+    assert!(reg.profiles.contains(who), E_POINTS);
+    let p = reg.profiles.borrow_mut(who);
+    assert!(p.points >= cost, E_POINTS);
+    p.points = p.points - cost;
+    mint_cosmetic(reg, kind, 0, who, ctx);
+}
+
+/// Admin-only: issue a cosmetic as a season, event or tournament prize (any kind, supply-capped).
+entry fun grant(_: &AdminCap, reg: &mut Registry, kind: u8, season: u64, to: address, ctx: &mut TxContext) {
+    mint_cosmetic(reg, kind, season, to, ctx);
 }
 
 /// Anyone can finalize a day once it has ended: top 3 get season points (5/3/1), the winner gets a Trophy.
@@ -166,6 +242,12 @@ fun check_log(log: &vector<u16>) {
 
 /// Deterministic replay of a jump log + shot log. Aborts E_BAD_LOG on a malformed log.
 public fun replay(seed: u64, jumps: &vector<u16>, shots: &vector<u16>): u64 {
+    let (score, _) = simulate(seed, jumps, shots);
+    score
+}
+
+/// Returns (score, survived).
+fun simulate(seed: u64, jumps: &vector<u16>, shots: &vector<u16>): (u64, bool) {
     check_log(jumps);
     check_log(shots);
     let nj = jumps.length();
@@ -240,7 +322,7 @@ public fun replay(seed: u64, jumps: &vector<u16>, shots: &vector<u16>): u64 {
     };
     let mut score = passed * 100 + tick + kills * 50;
     if (!dead) score = score + hp * 50;
-    score
+    (score, !dead)
 }
 
 /// Free run: seed comes from sui::random. Must stay a non-public `entry` fun.
@@ -269,7 +351,7 @@ entry fun submit_run(
 ) {
     let Run { id, seed, day } = run;
     id.delete();
-    let score = replay(seed, &jumps, &shots);
+    let (score, alive) = simulate(seed, &jumps, &shots);
     assert!(score == claimed_score, E_SCORE_MISMATCH);
 
     board.entries.push_back(Entry { player: ctx.sender(), score });
@@ -280,7 +362,10 @@ entry fun submit_run(
     };
     if (board.entries.length() > MAX_ENTRIES) { board.entries.pop_back(); };
 
-    if (day > 0) record_day(reg, day, ctx.sender(), score);
+    if (day > 0) {
+        record_day(reg, day, ctx.sender(), score);
+        award_daily(reg, ctx.sender(), day, alive);
+    };
 
     transfer::public_transfer(Receipt { id: object::new(ctx), seed, score, day }, ctx.sender());
 }
@@ -307,6 +392,19 @@ public fun submit_for_testing(
 #[test_only]
 public fun finalize_for_testing(reg: &mut Registry, clock: &Clock, day: u64, ctx: &mut TxContext) {
     finalize_day(reg, clock, day, ctx)
+}
+
+#[test_only]
+public fun reward_points(reg: &Registry, player: address): u64 {
+    if (reg.profiles.contains(player)) reg.profiles.borrow(player).points else 0
+}
+
+#[test_only]
+public fun redeem_for_testing(reg: &mut Registry, kind: u8, ctx: &mut TxContext) { redeem(reg, kind, ctx) }
+
+#[test_only]
+public fun grant_for_testing(cap: &AdminCap, reg: &mut Registry, kind: u8, to: address, ctx: &mut TxContext) {
+    grant(cap, reg, kind, 1, to, ctx)
 }
 
 #[test_only]

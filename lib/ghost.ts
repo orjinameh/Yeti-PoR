@@ -2,7 +2,7 @@ import { replay, TICKS } from "./engine.ts";
 
 export type Ghost = { seed: string; score: number; jumps: number[]; shots: number[] };
 
-const key = (seed: bigint | string) => `yeti:best2:${seed.toString()}`;
+const key = (seed: bigint | string) => `yeti:best3:${seed.toString()}`;
 
 /** Shareable text code: YG2:<seed>:<jump ticks>:<shot ticks> (comma separated) */
 export function encodeGhost(seed: bigint, jumps: number[], shots: number[]): string {

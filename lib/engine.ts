@@ -1,15 +1,15 @@
 // Deterministic fixed-point runner engine v2. MUST stay identical to move/sources/proof_of_run.move.
 //
-// Story: Subject Y-7 (the yeti) escapes Halcyon Station. 600 ticks (60s), 4 stages of 150 ticks.
+// Story: Subject Y-7 (the yeti) escapes Halcyon Station. 1800 ticks (3 min), 4 stages of 450 ticks.
 // Inputs: a log of jump ticks and a log of shot ticks. Shots are hitscan auto-aim (no projectile sim).
 //
 // Obstacle kinds (one active at a time, spaced >= 16 ticks apart, each overlapping the player for 3 ticks):
 //   0 crate  - hurts you if you are on the ground. Can't be shot. Jump it.
 //   1 sentry - ground enemy, 2 hp. Hurts you if you are on the ground. Jump it or shoot it.
 //   2 drone  - air enemy, 1 hp. Hurts you if you are airborne. Stay low or shoot it.
-export const TICKS = 600;
+export const TICKS = 1800;
 export const TPS = 10;
-export const STAGE_TICKS = 150;
+export const STAGE_TICKS = 450;
 export const PROFILE = [9, 16, 22, 27, 30, 31, 31, 30, 27, 22, 16, 9];
 export const HP_MAX = 5;
 export const INV_TICKS = 6;

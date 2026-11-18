@@ -51,6 +51,8 @@ export default function Console() {
   const { mutateAsync: signAndExec } = useSignAndExecuteTransaction();
   const { mutate: disconnect } = useDisconnectWallet();
 
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => { try { setIsMobile(/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)); } catch {} }, []);
   const [screen, setScreen] = useState<Screen>("boot");
   const [back, setBack] = useState<Screen>("title");
   const [bootStep, setBootStep] = useState(0);
@@ -64,6 +66,7 @@ export default function Console() {
   const [board, setBoard] = useState<Row[]>([]);
   const [dayRows, setDayRows] = useState<Row[]>([]);
   const [seasonRows, setSeasonRows] = useState<Row[]>([]);
+  const [myPoints, setMyPoints] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>("all");
   const [busy, setBusy] = useState(false);
   const [sfxOn, setSfxOn] = useState(true);
@@ -254,6 +257,13 @@ export default function Console() {
       const rf = (reg.data?.content as any)?.fields;
       const daysId = rf?.days?.fields?.id?.id;
       const seasonId = rf?.season?.fields?.id?.id;
+      const profId = rf?.profiles?.fields?.id?.id;
+      if (profId && acct) {
+        try {
+          const pr = await client.getDynamicFieldObject({ parentId: profId, name: { type: "address", value: acct.address } });
+          setMyPoints(Number((pr.data?.content as any)?.fields?.value?.fields?.points ?? 0));
+        } catch { setMyPoints(0); }
+      } else setMyPoints(null);
       if (daysId) {
         try {
           const d = await client.getDynamicFieldObject({ parentId: daysId, name: { type: "u64", value: String(utcDay(Date.now())) } });
@@ -269,7 +279,25 @@ export default function Console() {
         setSeasonRows(rows.slice(0, 10));
       }
     } catch { /* ignore */ }
-  }, [client]);
+  }, [client, acct]);
+
+  const redeem = async (kind: number, name: string) => {
+    if (!REGISTRY_ID) return;
+    setBusy(true);
+    try {
+      const tx = new Transaction();
+      tx.moveCall({ target: `${PACKAGE_ID}::${MODULE}::redeem`, arguments: [tx.object(REGISTRY_ID), tx.pure.u8(kind)] });
+      const { digest } = await signAndExec({ transaction: tx as any });
+      await client.waitForTransaction({ digest });
+      push({ ok: true, msg: `${name} added to your wallet.`, digest });
+      flash(`${name} unlocked`);
+      loadBoard();
+    } catch (e: any) {
+      flash("Not enough points, or sold out");
+      push({ ok: false, msg: `Redeem failed: ${e?.message ?? e}` });
+    }
+    setBusy(false);
+  };
 
   const finalizeYesterday = async () => {
     if (!REGISTRY_ID) return;
@@ -502,7 +530,10 @@ export default function Console() {
                 {acct ? (
                   <button className="mbtn slim" onClick={() => { audio.click(); disconnect(); }}><b>{short(acct.address)}</b><small>TAP TO DISCONNECT</small></button>
                 ) : (
-                  <ConnectModal trigger={<button className="mbtn slim" onClick={() => audio.click()}><b>CONNECT WALLET</b><small>For verified runs</small></button>} />
+                  <>
+                    <ConnectModal trigger={<button className="mbtn slim" onClick={() => audio.click()}><b>CONNECT WALLET</b><small>For verified runs</small></button>} />
+                    {isMobile && <p className="note note-in">On a phone: pick Slush in the wallet list, or open this page inside your wallet app's browser.</p>}
+                  </>
                 )}
               </nav>
             </div>
@@ -605,6 +636,17 @@ export default function Console() {
                     </div>
                   );
                 })()}
+                {tab === "season" && REGISTRY_ID && acct && (
+                  <div className="shop">
+                    <p className="note note-in">Your reward points: <b>{myPoints ?? 0}</b>. Earned once per day on a verified daily run (1, +2 if you escape, +5 on every 5-day streak).</p>
+                    <div className="mrow">
+                      <button className="mbtn half" disabled={busy} onClick={() => redeem(0, "Ice Shard")}><b>ICE SHARD</b><small>Common - 5 pts</small></button>
+                      <button className="mbtn half" disabled={busy} onClick={() => redeem(1, "Frozen Helm")}><b>FROZEN HELM</b><small>Rare - 25 pts - 5,000 max</small></button>
+                      <button className="mbtn half" disabled={busy} onClick={() => redeem(2, "Glacier Armor")}><b>GLACIER ARMOR</b><small>Epic - 60 pts - 1,000 max</small></button>
+                    </div>
+                    <p className="note note-in">Eternal Crown (legendary, 100 max) is only granted to season winners and event champions.</p>
+                  </div>
+                )}
                 {tab === "today" && <p className="note note-in">Daily boards keep each player's best verified score. Winners of finished days earn season points (5 / 3 / 1) and a Trophy.</p>}
                 <div className="p-foot">
                   <button className="mbtn" onClick={() => { audio.click(); setScreen(back); }}><b>BACK</b></button>

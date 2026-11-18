@@ -16,7 +16,7 @@ Honest limit: this proves a score is consistent with a legal input log, not that
 4. `npm install && npm run dev`, connect a testnet wallet, Start verified run, play, Submit, then Forge it.
 
 ## Day-1 risks to check (from the brief)
-- Replay gas for 600 ticks: if too high, lower TICKS or chunk verification across transactions.
+- Replay gas for 1800 ticks (3 min runs): if too high, lower TICKS or chunk verification across transactions.
 - `sui::random` rules: `start_run` is a non-public `entry` taking `&Random` (0x8); keep it that way.
 - Forge it: wallets dry-run first, so the abort may show before signing. For the on-chain explorer proof, set a manual gas budget or execute via CLI: `sui client call --package <PKG> --module proof_of_run --function submit_run --args <BOARD> <RUN> "[1,2]" 9999 --gas-budget 50000000`.
 

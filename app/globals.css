@@ -209,3 +209,9 @@ button { font-family: inherit; color: inherit; }
 .tab { font-family: var(--pixel); font-size: max(7px, calc(var(--s) * 1)); letter-spacing: 0.14em; padding: calc(var(--s) * 0.8) calc(var(--s) * 1.6); border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0, 0, 0, 0.3); color: #8b95a7; cursor: pointer; }
 .tab.on { background: linear-gradient(180deg, #62b9e8, #2f7fb3); color: #fff; border-color: rgba(190, 235, 255, 0.4); }
 .note.note-in { padding: 0 calc(var(--s) * 2.4) calc(var(--s) * 1); }
+
+.shop .mrow { display: flex; gap: 8px; width: 100%; margin: 6px 0; }
+.shop .mbtn.half { flex: 1 1 0; min-width: 0; width: auto; padding: 8px 4px; }
+.shop .mbtn b { font-size: 12px; letter-spacing: 0.04em; }
+.shop .mbtn small { font-size: 9px; }
+.shop .mrow { width: auto; margin: 6px 22px; }
