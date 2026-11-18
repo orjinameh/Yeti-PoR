@@ -532,7 +532,7 @@ export default function Console() {
                 ) : (
                   <>
                     <ConnectModal trigger={<button className="mbtn slim" onClick={() => audio.click()}><b>CONNECT WALLET</b><small>For verified runs</small></button>} />
-                    {isMobile && <p className="note note-in">On a phone: pick Slush in the wallet list, or open this page inside your wallet app's browser.</p>}
+                    {isMobile && <p className="note note-in">On a phone: pick Slush (sign in with Google, Apple or a passkey), or open this page in your wallet app's built-in browser.</p>}
                   </>
                 )}
               </nav>

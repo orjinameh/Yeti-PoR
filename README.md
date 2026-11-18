@@ -47,3 +47,8 @@ The `Run`, `Receipt`, `submit_run` and replay signatures changed, so publish a f
 
 ## Not built yet
 Ghosts from other players (needs winning input logs stored on-chain or in an indexer), a seasons rollover (season is currently one running total), trophy artwork/display.
+
+## Mobile wallet login
+- The app registers the **Slush web wallet** through `WalletProvider slushWallet` (needs `@mysten/dapp-kit` >= 0.16; the repo is on 0.19.11). On a phone browser, tap CONNECT WALLET and pick Slush: it signs in with Google, Apple or a passkey, no extension or app install.
+- Wallet app users (Slush, Suiet etc.) can also open the site in the wallet's built-in browser; it injects the wallet automatically.
+- Slush's web wallet opens a popup, so allow popups for your site if the phone browser blocks it. Use a testnet account and faucet SUI.

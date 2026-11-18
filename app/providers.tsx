@@ -12,9 +12,9 @@ export default function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={qc}>
       <SuiClientProvider networks={networks} defaultNetwork="testnet">
-        {/* slushWallet adds the Slush web wallet (works in a phone browser, no extension needed).
-            Spread via any so an older dapp-kit that lacks the prop cannot break the build. */}
-        <WalletProvider autoConnect {...({ slushWallet: { name: "Yeti Proof-of-Run" } } as any)}>{children}</WalletProvider>
+        {/* Slush web wallet: sign in with Google/Apple/passkey in a phone browser, no extension or app install.
+            Needs @mysten/dapp-kit >= 0.16 (older versions silently ignore this prop). */}
+        <WalletProvider autoConnect slushWallet={{ name: "Yeti Proof-of-Run" }}>{children}</WalletProvider>
       </SuiClientProvider>
     </QueryClientProvider>
   );
