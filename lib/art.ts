@@ -21,7 +21,7 @@ type Ctx = CanvasRenderingContext2D;
 
 export const STAGES = [
   { name: "CELL BLOCK", line: "The lock failed. Nobody noticed. Run." },
-  { name: "LAB CORRIDOR", line: "The sentries are waking up. Shoot, or jump." },
+  { name: "LAB CORRIDOR", line: "The sentries are waking up. Too big to jump. Shoot them." },
   { name: "CARGO BAY", line: "Drones overhead. Stay low, or shoot them down." },
   { name: "THE BREAKOUT", line: "Cold air. The mountain is right there." },
 ];

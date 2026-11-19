@@ -112,6 +112,13 @@ export async function describeCreated(client: any, created: string[]): Promise<s
 
 /** Tick the on-chain Run has been verified up to (0 for a fresh run). Used to resume a half-submitted long run. */
 export async function readRunTick(client: any, runId: string): Promise<number> {
-  const c = await content(client, runId);
-  return Number(RunBcs.parse(c.bytes).st.tick);
+  try {
+    const c = await content(client, runId);
+    // A Run from an older contract has no simulation state (only id, seed, day = 48 bytes). Parsing it with the
+    // current layout reads past the end of the buffer ("Out of bounds access" in Safari), so treat it as a fresh run.
+    if (c.bytes.length < 48 + 89) return 0;
+    return Number(RunBcs.parse(c.bytes).st.tick);
+  } catch {
+    return 0; // could not read the state: start from the first segment, the contract rejects it clearly if that is wrong
+  }
 }

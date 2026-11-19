@@ -26,7 +26,7 @@ The game is presented as a handheld console: a left rail (sound and music keys, 
 Story: Subject Y-7, a yeti held at Halcyon Station, escapes when the cell lock fails. 4 stages of 150 ticks: Cell Block, Lab Corridor, Cargo Bay, The Breakout.
 
 Gameplay (same rules in `lib/engine.ts` and `move/sources/proof_of_run.move`):
-- Crates: jump them. Sentries (2 hp, ground): jump or shoot. Drones (1 hp, air): stay low or shoot.
+- Crates: jump them. Sentries (2 hp, 3 from level 6, ground): too big to jump, you must shoot them. Drones (1 hp, air): stay low or shoot.
 - 5 health, short invulnerability after a hit. Score = gates passed x 100 + ticks survived + takedowns x 50 + health left x 50 if you escape.
 - Inputs logged: jump ticks and shot ticks. Hold-to-fire auto-aims the nearest enemy in range.
 

@@ -396,7 +396,7 @@ fun advance(run: &mut SimState, jumps: &vector<u16>, shots: &vector<u16>) {
             } else if (ehp == 0) {
                 false
             } else if (kind == 1) {
-                h < 3
+                true // sentries are too big to jump: only shooting them dead avoids the hit
             } else {
                 h >= 3
             };

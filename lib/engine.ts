@@ -5,7 +5,7 @@
 //
 // Obstacle kinds (one active at a time, spaced >= 16 ticks apart, each overlapping the player for 3 ticks):
 //   0 crate  - hurts you if you are on the ground. Can't be shot. Jump it.
-//   1 sentry - ground enemy, 2 hp. Hurts you if you are on the ground. Jump it or shoot it.
+//   1 sentry - big ground enemy, 2 hp (3 from level 6). Too big to jump: it hurts you at any height until you shoot it dead.
 //   2 drone  - air enemy, 1 hp. Hurts you if you are airborne. Stay low or shoot it.
 export const MAX_TICKS = 108000; // 3 hours at base speed
 export const SEG_TICKS = 1800; // one on-chain transaction verifies at most this many ticks (log ticks are segment-relative)
@@ -117,7 +117,7 @@ export class Sim {
     if (this.inv > 0) this.inv -= 1;
     if (this.tick >= this.start && this.tick <= this.start + 2 && this.inv === 0) {
       const danger =
-        this.kind === 0 ? h < 3 : this.ehp === 0 ? false : this.kind === 1 ? h < 3 : h >= 3;
+        this.kind === 0 ? h < 3 : this.ehp === 0 ? false : this.kind === 1 ? true : h >= 3;
       if (danger) {
         this.hp -= 1;
         this.inv = INV_TICKS;

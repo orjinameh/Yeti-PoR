@@ -20,9 +20,9 @@ fun vector_bot_seed_42() {
 
 #[test]
 fun vector_jump_only_seed_42() {
-    let js: vector<vector<u16>> = vector[vector[20, 39, 64, 81, 103, 122, 145, 161, 182, 203, 221, 241, 261, 285, 304, 322, 341, 360, 377, 400, 421, 445, 465, 485, 503, 520, 537, 558, 579, 604, 629, 653, 676, 697, 715, 738]];
+    let js: vector<vector<u16>> = vector[vector[20, 39, 64, 81, 103, 122, 145, 161, 182, 203, 221, 241, 261, 285, 304, 322, 341, 360, 377, 400, 421, 445]];
     let ss: vector<vector<u16>> = vector[vector[]];
-    assert!(proof_of_run::run_segments(42, &js, &ss) == 4239);
+    assert!(proof_of_run::run_segments(42, &js, &ss) == 2546);
 }
 
 #[test]
