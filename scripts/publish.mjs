@@ -32,6 +32,12 @@ for (const [k, v] of Object.entries(ids)) {
   text = re.test(text) ? text.replace(re, `${k}=${v}`) : text + (text && !text.endsWith("\n") ? "\n" : "") + `${k}=${v}\n`;
 }
 writeFileSync(file, text);
+const pub = changes.find((c) => c.type === "created" && String(c.objectType).endsWith("::package::Publisher"))?.objectId;
+console.log("\nSetting up wallet displays (names and art)...");
+try {
+  run(["client", "call", "--package", pkg, "--module", "proof_of_run", "--function", "setup_displays", "--args", "0xd", pub, "--gas-budget", "200000000"]);
+  console.log("Displays set up.");
+} catch { console.error("Display setup failed. Run it later with: npm run setup:displays"); }
 console.log("\nPublished. Wrote to .env.local (old file saved as .env.local.bak):");
 for (const [k, v] of Object.entries(ids)) console.log(`  ${k}=${v}`);
 console.log("\nRestart the dev server (npm run dev) or redeploy so the new ids are picked up.");
