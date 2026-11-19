@@ -57,9 +57,12 @@ export default function Console() {
   const acct = useCurrentAccount();
   const client = useSuiClient();
   // Re-sending an already signed transaction is idempotent (same digest), so a dropped request ("Load failed") is safe to retry.
+  const stepRef = useRef("wallet signing");
   const { mutateAsync: signAndExec } = useSignAndExecuteTransaction({
-    execute: async ({ bytes, signature }) =>
-      await retry(() => client.executeTransactionBlock({ transactionBlock: bytes, signature, options: { showRawEffects: true, showObjectChanges: true, showEffects: true } })),
+    execute: async ({ bytes, signature }) => {
+      stepRef.current = "sending to the Sui RPC after wallet approval";
+      return await retry(() => client.executeTransactionBlock({ transactionBlock: bytes, signature, options: { showRawEffects: true, showObjectChanges: true, showEffects: true } }));
+    },
   });
   const { mutate: disconnect } = useDisconnectWallet();
 
@@ -200,6 +203,7 @@ export default function Console() {
         if (m === "daily") tx.moveCall({ target: `${PACKAGE_ID}::${MODULE}::start_daily_run`, arguments: [tx.object(CLOCK_ID)] });
         else tx.moveCall({ target: `${PACKAGE_ID}::${MODULE}::start_run`, arguments: [tx.object(RANDOM_ID)] });
         step = "wallet signing";
+        stepRef.current = "wallet signing";
         const { digest } = await signAndExec({ transaction: tx as any });
         setLoadMsg("WAITING FOR THE CHAIN");
         step = "confirming transaction";
@@ -225,7 +229,8 @@ export default function Console() {
         const msg = String(e?.message ?? e);
         const rejected = /reject|denied|declin|cancel|closed/i.test(msg);
         const net = /load failed|failed to fetch|networkerror|429|timeout/i.test(msg);
-        push({ ok: false, msg: rejected ? "Wallet request was rejected or closed." : `Could not start a verified run (${step}): ${msg}${net ? ". Network/RPC problem, your transaction may have gone through. Check your wallet activity, then try again." : ""}` });
+        const where = step === "wallet signing" ? stepRef.current : step;
+        push({ ok: false, msg: rejected ? "Wallet request was rejected or closed." : `Could not start a verified run (${where}): ${msg}${net ? ". Network problem. Check your wallet activity, then try again." : ""}` });
         flash(rejected ? "Verified run cancelled" : "Verified run failed - see log");
         setScreen("title");
         return;
