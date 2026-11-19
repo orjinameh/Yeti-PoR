@@ -21,7 +21,7 @@ type Ctx = CanvasRenderingContext2D;
 
 export const STAGES = [
   { name: "CELL BLOCK", line: "The lock failed. Nobody noticed. Run." },
-  { name: "LAB CORRIDOR", line: "The sentries are waking up. Too big to jump. Shoot them." },
+  { name: "LAB CORRIDOR", line: "The sentries are waking up. Shoot, or jump." },
   { name: "CARGO BAY", line: "Drones overhead. Stay low, or shoot them down." },
   { name: "THE BREAKOUT", line: "Cold air. The mountain is right there." },
 ];
@@ -333,42 +333,8 @@ function crate0(ctx: Ctx, x: number): void {
   glow(ctx, x + OB_W / 2, G - 11, 30, "rgba(90,220,255,A)", 0.4);
 }
 
-/** extra visual height (native units, before SENTRY_SCALE) so a sentry towers above the highest jump */
-export const SENTRY_LIFT = 40;
-
-function sentry0(ctx: Ctx, x: number, t: number, hp: number, flash: number): void {
-  const cx = x + OB_W / 2;
-  const L = SENTRY_LIFT;
-  ctx.fillStyle = "rgba(10,20,45,0.3)";
-  ctx.beginPath(); ctx.ellipse(cx, G + 2, 30, 5, 0, 0, TAU); ctx.fill();
-  rr(ctx, x - 2, G - 14, OB_W + 4, 14, 7); ctx.fillStyle = "#222a44"; ctx.fill();
-  ctx.fillStyle = "#5b6a92";
-  for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.arc(x + 6 + i * ((OB_W - 12) / 4), G - 7, 3.5, 0, TAU); ctx.fill(); }
-  // tower body from the base up to the torso
-  rr(ctx, x + 8, G - 27 - L, OB_W - 16, L + 16, 5); ctx.fillStyle = vgrad(ctx, G - 27 - L, G - 11, [[0, "#6d7da6"], [1, "#2f3a5c"]]); ctx.fill();
-  ctx.fillStyle = "#3a4668";
-  for (let i = 1; i < 4; i++) { rr(ctx, x + 8, G - 27 - L + i * (L / 4), OB_W - 16, 3, 1.5); ctx.fill(); }
-  ctx.save();
-  ctx.translate(0, -L);
-  rr(ctx, x + 2, G - 27, OB_W - 4, 16, 8); ctx.fillStyle = vgrad(ctx, G - 27, G - 11, [[0, "#a9b9d8"], [1, "#5d6d95"]]); ctx.fill();
-  rr(ctx, x + 6, G - 20, OB_W - 12, 4, 2); ctx.fillStyle = "#ff9a4d"; ctx.fill();
-  ctx.beginPath(); ctx.arc(cx, G - 26, 14, Math.PI, 0); ctx.closePath();
-  ctx.fillStyle = vgrad(ctx, G - 40, G - 26, [[0, "#d6e1f5"], [1, "#7d8fb8"]]); ctx.fill();
-  const sc = Math.sin(t * 3 + x * 0.02) * 4;
-  rr(ctx, cx - 8 + sc * 0.5, G - 34, 13, 6, 3); ctx.fillStyle = hp <= 1 ? "#ff5a5a" : "#ff9a4d"; ctx.fill();
-  glow(ctx, cx - 2 + sc * 0.5, G - 31, 28, "rgba(255,130,70,A)", 0.55);
-  rr(ctx, x - 10, G - 29, 17, 5, 2.5); ctx.fillStyle = "#3a4668"; ctx.fill();
-  if (hp <= 1) {
-    ctx.fillStyle = "rgba(60,70,90,0.5)";
-    ctx.beginPath(); ctx.arc(cx + 8 + Math.sin(t * 6) * 2, G - 46 - ((t * 20) % 10), 4, 0, TAU); ctx.fill();
-  }
-  ctx.restore();
-  if (flash > 0) { rr(ctx, x - 2, G - 41 - L, OB_W + 4, 41 + L, 11); ctx.fillStyle = `rgba(255,255,255,${flash * 0.8})`; ctx.fill(); }
-}
-
 // Ground obstacles are drawn large (like the big floor enemies in EMB). Scaling is visual only; hit boxes are unchanged.
 export const CRATE_SCALE = 1.55;
-export const SENTRY_SCALE = 1.85;
 function scaled(ctx: Ctx, x: number, k: number, draw: () => void): void {
   const cx = x + OB_W / 2;
   ctx.save();
@@ -376,34 +342,51 @@ function scaled(ctx: Ctx, x: number, k: number, draw: () => void): void {
   draw();
   ctx.restore();
 }
-/** Raw meat floating at height `lift` px above the body line: a marbled steak with a bone, bobbing and glowing. */
-export function drawMeat(ctx: Ctx, x: number, lift: number, t: number): void {
-  const cx = x + OB_W / 2;
-  const cy = G - 45 - lift + Math.sin(t * 4 + x * 0.03) * 3;
-  glow(ctx, cx, cy, 46, "rgba(255,90,90,A)", 0.5);
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(-0.25);
-  // bone
-  ctx.fillStyle = "#f4ecd8";
-  rr(ctx, 6, -5, 30, 10, 5); ctx.fill();
-  ctx.beginPath(); ctx.arc(37, -6, 6, 0, TAU); ctx.arc(37, 6, 6, 0, TAU); ctx.fill();
-  // steak
-  ctx.beginPath();
-  ctx.moveTo(-26, -4); ctx.bezierCurveTo(-24, -24, 10, -26, 18, -10);
-  ctx.bezierCurveTo(26, 6, 10, 22, -8, 20); ctx.bezierCurveTo(-24, 18, -30, 8, -26, -4);
-  ctx.closePath();
-  ctx.fillStyle = vgrad(ctx, -24, 20, [[0, "#ff6f7d"], [1, "#b8283c"]]); ctx.fill();
-  ctx.strokeStyle = "rgba(255,230,230,0.6)"; ctx.lineWidth = 2; ctx.stroke();
-  // fat marbling
-  ctx.strokeStyle = "rgba(255,225,225,0.85)"; ctx.lineWidth = 3; ctx.lineCap = "round";
-  ctx.beginPath(); ctx.moveTo(-16, 2); ctx.quadraticCurveTo(-6, -10, 6, -2); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(-12, 12); ctx.quadraticCurveTo(0, 4, 10, 10); ctx.stroke();
-  ctx.restore();
-}
 export function drawCrate(ctx: Ctx, x: number): void { scaled(ctx, x, CRATE_SCALE, () => crate0(ctx, x)); }
+/** Guard: a tall armoured ground unit (about 175px) that cannot be jumped, so it has to be shot. */
+export const GUARD_H = 175;
 export function drawSentry(ctx: Ctx, x: number, t: number, hp: number, flash: number): void {
-  scaled(ctx, x, SENTRY_SCALE, () => sentry0(ctx, x, t, hp, flash));
+  const cx = x + OB_W / 2;
+  const hurt = hp <= 1;
+  ctx.save();
+  ctx.fillStyle = "rgba(10,20,45,0.35)";
+  ctx.beginPath(); ctx.ellipse(cx, G + 2, 52, 7, 0, 0, TAU); ctx.fill();
+  // treads
+  rr(ctx, cx - 46, G - 26, 92, 26, 13); ctx.fillStyle = "#1c2340"; ctx.fill();
+  ctx.fillStyle = "#4b5a84";
+  for (let i = 0; i < 6; i++) { ctx.beginPath(); ctx.arc(cx - 36 + i * 14.4, G - 13, 5, 0, TAU); ctx.fill(); }
+  // legs / hull
+  rr(ctx, cx - 36, G - 96, 72, 76, 10); ctx.fillStyle = vgrad(ctx, G - 96, G - 20, [[0, "#b9c8e4"], [1, "#56668f"]]); ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.45)"; ctx.lineWidth = 2; ctx.stroke();
+  // hazard stripes
+  ctx.save(); rr(ctx, cx - 36, G - 56, 72, 14, 4); ctx.clip();
+  for (let i = -2; i < 8; i++) { ctx.fillStyle = i % 2 ? "#ffb23a" : "#1c2340"; ctx.beginPath(); ctx.moveTo(cx - 40 + i * 14, G - 42); ctx.lineTo(cx - 26 + i * 14, G - 42); ctx.lineTo(cx - 12 + i * 14, G - 56); ctx.lineTo(cx - 26 + i * 14, G - 56); ctx.fill(); }
+  ctx.restore();
+  // chest + shoulders
+  rr(ctx, cx - 44, G - 140, 88, 52, 14); ctx.fillStyle = vgrad(ctx, G - 140, G - 88, [[0, "#d3deF3"], [1, "#6c7ea8"]]); ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.stroke();
+  rr(ctx, cx - 22, G - 128, 44, 14, 7); ctx.fillStyle = hurt ? "#ff5a5a" : "#ff9a4d"; ctx.fill();
+  glow(ctx, cx, G - 121, 46, "rgba(255,130,70,A)", 0.5 + Math.sin(t * 5) * 0.12);
+  // head dome with visor
+  ctx.beginPath(); ctx.arc(cx, G - 140, 24, Math.PI, 0); ctx.closePath();
+  ctx.fillStyle = vgrad(ctx, G - 164, G - 140, [[0, "#e4ecfa"], [1, "#8fa1c7"]]); ctx.fill();
+  const sc = Math.sin(t * 2.4 + x * 0.02) * 5;
+  rr(ctx, cx - 18 + sc * 0.4, G - 156, 26, 9, 4.5); ctx.fillStyle = hurt ? "#ff3d3d" : "#ff7a3a"; ctx.fill();
+  glow(ctx, cx - 5 + sc * 0.4, G - 151, 34, "rgba(255,110,60,A)", 0.6);
+  // antenna
+  ctx.strokeStyle = "#8fa1c7"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(cx + 12, G - 162); ctx.lineTo(cx + 16, G - 176); ctx.stroke();
+  ctx.fillStyle = "#ff5a5a"; ctx.beginPath(); ctx.arc(cx + 16, G - 176, 3.5, 0, TAU); ctx.fill();
+  // cannon arm pointing at the player
+  rr(ctx, cx - 74, G - 118, 44, 16, 8); ctx.fillStyle = "#3a4668"; ctx.fill();
+  rr(ctx, cx - 82, G - 114, 14, 8, 4); ctx.fillStyle = "#ff9a4d"; ctx.fill();
+  // health pips
+  for (let i = 0; i < 3; i++) { ctx.fillStyle = i < hp ? "#ffb27a" : "rgba(20,28,50,0.7)"; ctx.fillRect(cx - 21 + i * 15, G - 190, 12, 5); }
+  if (hurt) {
+    ctx.fillStyle = "rgba(60,70,90,0.5)";
+    ctx.beginPath(); ctx.arc(cx + 22 + Math.sin(t * 6) * 3, G - 170 - ((t * 24) % 14), 5, 0, TAU); ctx.fill();
+  }
+  if (flash > 0) { rr(ctx, cx - 46, G - 166, 92, 166, 14); ctx.fillStyle = `rgba(255,255,255,${flash * 0.7})`; ctx.fill(); }
+  ctx.restore();
 }
 
 export function drawDrone(ctx: Ctx, x: number, t: number, flash: number, danger: boolean): void {
@@ -432,7 +415,7 @@ export function drawDrone(ctx: Ctx, x: number, t: number, flash: number, danger:
 }
 
 export const enemyCenter = (kind: number, x: number): [number, number] =>
-  kind === 2 ? [x + OB_W / 2, DRONE_Y] : [x + OB_W / 2, G - (24 + SENTRY_LIFT) * SENTRY_SCALE];
+  kind === 2 ? [x + OB_W / 2, DRONE_Y] : [x + OB_W / 2, G - 118];
 
 // ---------- the yeti: Subject Y-7 (original design) ----------
 export type YetiPose = {

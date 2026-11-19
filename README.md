@@ -26,7 +26,7 @@ The game is presented as a handheld console: a left rail (sound and music keys, 
 Story: Subject Y-7, a yeti held at Halcyon Station, escapes when the cell lock fails. 4 stages of 150 ticks: Cell Block, Lab Corridor, Cargo Bay, The Breakout.
 
 Gameplay (same rules in `lib/engine.ts` and `move/sources/proof_of_run.move`):
-- Raw meat floats in the low, middle or high lane: be at that height as it passes to collect it (+25 score each). Collecting meat earns the Scavenger, Hunter and Well Fed achievements (15, 50, 120 in one run). Sentries (2 hp, 3 from level 6, ground): too big to jump, you must shoot them. Drones (1 hp, air): stay low or shoot.
+- Crates: jump them. Sentries (2 hp, ground): jump or shoot. Drones (1 hp, air): stay low or shoot.
 - 5 health, short invulnerability after a hit. Score = gates passed x 100 + ticks survived + takedowns x 50 + health left x 50 if you escape.
 - Inputs logged: jump ticks and shot ticks. Hold-to-fire auto-aims the nearest enemy in range.
 
@@ -59,6 +59,3 @@ Ghosts from other players (needs winning input logs stored on-chain or in an ind
 - **Wallet visibility**: `Cosmetic`, `Trophy` and `Receipt` now have Sui Display (name, description, image). Images are `public/nft/*.svg`, served via jsDelivr from `orjinameh/Yeti-PoR@main`; push the repo to `main` so they resolve. Wallet support for SVG varies.
 - **First verified run** mints a free Ice Shard; daily runs earn reward points (1, +2 if the run lasts a full segment, +5 on a 5-day streak).
 - Publish fresh (new `Run` layout, new init with Display): update all three IDs.
-
-## Ghost challenges
-The contract keeps each player's best input log (jumps and shots as absolute ticks) as a dynamic field on the Registry, keyed by (day, player); day 0 is the player's best run ever. The leaderboard's CHALLENGE button reads it, replays it locally to re-compute its score, and loads it as the ghost on its seed. Only runs submitted on this contract version have a ghost; logs longer than 8,000 inputs are not stored.

@@ -6,9 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "vectors": "node --experimental-strip-types scripts/vectors.ts",
-    "move:test": "cd move && sui move test",
-    "publish:testnet": "node scripts/publish.mjs",
-    "setup:displays": "node scripts/setup-displays.mjs"
+    "move:test": "cd move && sui move test"
   },
   "dependencies": {
     "@mysten/dapp-kit-core": "^1.6.43",

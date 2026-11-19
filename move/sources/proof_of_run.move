@@ -4,8 +4,7 @@ module proof_of_run::proof_of_run;
 
 use std::string::String;
 use sui::clock::Clock;
-use sui::dynamic_field as df;
-use sui::display_registry::{Self, DisplayRegistry, Display as DisplayV2, DisplayCap};
+use sui::display;
 use sui::package;
 use sui::random::{Self, Random};
 use sui::table::{Self, Table};
@@ -16,8 +15,6 @@ const MAX_TICKS: u64 = 108000;
 const SEG_TICKS: u64 = 1800;
 const STAGE_TICKS: u64 = 450;
 const MAX_ENTRIES: u64 = 10;
-/// Runs whose input log is longer than this (jumps + shots) are not stored as ghosts.
-const MAX_GHOST_LOG: u64 = 8000;
 const HP_MAX: u64 = 5;
 const INV_TICKS: u64 = 6;
 const SHOT_CD: u64 = 3;
@@ -45,12 +42,7 @@ const CAP_CROWN: u64 = 100;
 const PROFILE: vector<u64> = vector[9, 16, 22, 27, 30, 31, 31, 30, 27, 22, 16, 9];
 
 /// day = 0 for free runs, otherwise the UTC day number of the daily challenge.
-/// jumps/shots are the ABSOLUTE ticks of every input so far (capped), kept so the finished run can be raced as a ghost.
-public struct Run has key { id: UID, seed: u64, day: u64, st: SimState, jumps: vector<u32>, shots: vector<u32> }
-
-/// Best ghost per (day, player), stored as dynamic fields on the Registry. day 0 = the player's best ever run.
-public struct GhostKey has copy, drop, store { day: u64, player: address }
-public struct GhostRec has store, drop { seed: u64, score: u64, jumps: vector<u32>, shots: vector<u32> }
+public struct Run has key { id: UID, seed: u64, day: u64, st: SimState }
 
 /// Simulation state carried between segments. Mirrors Sim in lib/engine.ts.
 public struct SimState has store, copy, drop {
@@ -66,11 +58,9 @@ public struct SimState has store, copy, drop {
     inv: u64,
     cd: u64,
     dead: bool,
-    meat: u64,
 }
 
-/// SOULBOUND (key only, no store): the module can mint it to a player but nobody can transfer or sell it.
-public struct Receipt has key { id: UID, seed: u64, score: u64, day: u64 }
+public struct Receipt has key, store { id: UID, seed: u64, score: u64, day: u64 }
 
 public struct Entry has copy, drop, store { player: address, score: u64 }
 
@@ -80,7 +70,7 @@ public struct Leaderboard has key { id: UID, entries: vector<Entry> }
 public struct DayBoard has store { entries: vector<Entry>, finalized: bool }
 
 /// Reward points are earned once per UTC day per player (first verified daily run), which stops farming.
-public struct Profile has store { points: u64, last_day: u64, streak: u64, welcomed: bool, ach: u64 }
+public struct Profile has store { points: u64, last_day: u64, streak: u64, welcomed: bool }
 
 public struct Registry has key {
     id: UID,
@@ -98,25 +88,57 @@ public struct Cosmetic has key, store { id: UID, kind: u8, name: String, rarity:
 /// One-time witness (module name in capitals) used to claim the Publisher for Display.
 public struct PROOF_OF_RUN has drop {}
 
-/// Image host for wallet display. SVGs live in public/nft of the repo; change it later with display_registry::set
-/// using the DisplayCap objects that setup_displays sends to the deployer.
+/// Image host for wallet display. SVGs live in public/nft of the repo; change it later with display::update_version
+/// on the Display objects held by the publisher if you host them elsewhere.
 const IMAGE_BASE: vector<u8> = b"https://cdn.jsdelivr.net/gh/orjinameh/Yeti-PoR@main/public/nft/";
 
 
 /// Minted to the verified winner of a finished daily challenge.
-/// SOULBOUND (key only): proves the player won a daily challenge, so it can never be bought.
-public struct Trophy has key { id: UID, day: u64, seed: u64, score: u64 }
-
-/// SOULBOUND achievement badge (key only). Tier 1 of the collectibles; cosmetics are tier 2 and tradable.
-/// kind: 0 First Ascent (first verified run), 1 Ice Survivor (reach level 3), 2 Peak Performer (score 10,000+),
-/// 3 Yeti Legend (escape Halcyon: survive the full 3 hours), 4 Scavenger / 5 Hunter / 6 Well Fed (collect 15 / 50 / 120 raw meat in one run).
-/// Each is minted once per player.
-public struct Achievement has key { id: UID, kind: u8, name: String, score: u64 }
+public struct Trophy has key, store { id: UID, day: u64, seed: u64, score: u64 }
 
 fun init(otw: PROOF_OF_RUN, ctx: &mut TxContext) {
-    // Display V1 can no longer be created (it aborts), so wallet art is set up once after publish
-    // by `setup_displays` (Display V2). init only claims the Publisher and creates the shared state.
     let publisher = package::claim(otw, ctx);
+    let base: String = IMAGE_BASE.to_string();
+
+    let mut d = display::new_with_fields<Cosmetic>(
+        &publisher,
+        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string(), b"project_url".to_string()],
+        vector[
+            b"{name}".to_string(),
+            b"Yeti Proof-of-Run {rarity} cosmetic, edition #{serial}. Earned by playing verified runs.".to_string(),
+            { let mut u = copy base; u.append(b"cosmetic-{kind}.svg".to_string()); u },
+            b"https://github.com/orjinameh/Yeti-PoR".to_string(),
+        ],
+        ctx,
+    );
+    d.update_version();
+    transfer::public_transfer(d, ctx.sender());
+
+    let mut t = display::new_with_fields<Trophy>(
+        &publisher,
+        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
+        vector[
+            b"Daily Champion Trophy - day {day}".to_string(),
+            b"Won the verified Yeti daily challenge for day {day} with a score of {score}.".to_string(),
+            { let mut u = copy base; u.append(b"trophy.svg".to_string()); u },
+        ],
+        ctx,
+    );
+    t.update_version();
+    transfer::public_transfer(t, ctx.sender());
+
+    let mut r = display::new_with_fields<Receipt>(
+        &publisher,
+        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
+        vector[
+            b"Yeti Run Receipt".to_string(),
+            b"Proof that this run was replayed and verified on-chain. Score {score}.".to_string(),
+            { let mut u = copy base; u.append(b"receipt.svg".to_string()); u },
+        ],
+        ctx,
+    );
+    r.update_version();
+    transfer::public_transfer(r, ctx.sender());
     transfer::public_transfer(publisher, ctx.sender());
 
     transfer::share_object(Leaderboard { id: object::new(ctx), entries: vector[] });
@@ -128,79 +150,6 @@ fun init(otw: PROOF_OF_RUN, ctx: &mut TxContext) {
         minted: table::new(ctx),
     });
     transfer::public_transfer(AdminCap { id: object::new(ctx) }, ctx.sender());
-}
-
-fun fill<T>(
-    d: &mut DisplayV2<T>,
-    cap: &DisplayCap<T>,
-    keys: vector<String>,
-    values: vector<String>,
-) {
-    let mut i = 0;
-    while (i < keys.length()) {
-        display_registry::set(d, cap, keys[i], values[i]);
-        i = i + 1;
-    };
-}
-
-/// One-time, after publish: creates the Display V2 objects (wallet name/art) for Cosmetic, Trophy,
-/// Receipt and Achievement. Needs the Publisher (held by the deployer) and the system DisplayRegistry object 0xd.
-/// Each DisplayCap goes to the caller, so the art can be edited later. Aborts if already set up.
-entry fun setup_displays(
-    registry: &mut DisplayRegistry,
-    publisher: &mut package::Publisher,
-    ctx: &mut TxContext,
-) {
-    let base: String = IMAGE_BASE.to_string();
-
-    let (mut d, cap) = display_registry::new_with_publisher<Cosmetic>(registry, publisher, ctx);
-    fill(&mut d, &cap,
-        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string(), b"project_url".to_string()],
-        vector[
-            b"{name}".to_string(),
-            b"Yeti Proof-of-Run {rarity} cosmetic, edition #{serial}. Earned by playing verified runs.".to_string(),
-            { let mut u = copy base; u.append(b"cosmetic-{kind}.svg".to_string()); u },
-            b"https://github.com/orjinameh/Yeti-PoR".to_string(),
-        ],
-    );
-    display_registry::share(d);
-    transfer::public_transfer(cap, ctx.sender());
-
-    let (mut t, tcap) = display_registry::new_with_publisher<Trophy>(registry, publisher, ctx);
-    fill(&mut t, &tcap,
-        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
-        vector[
-            b"Daily Champion Trophy - day {day}".to_string(),
-            b"Won the verified Yeti daily challenge for day {day} with a score of {score}.".to_string(),
-            { let mut u = copy base; u.append(b"trophy.svg".to_string()); u },
-        ],
-    );
-    display_registry::share(t);
-    transfer::public_transfer(tcap, ctx.sender());
-
-    let (mut r, rcap) = display_registry::new_with_publisher<Receipt>(registry, publisher, ctx);
-    fill(&mut r, &rcap,
-        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
-        vector[
-            b"Yeti Run Receipt".to_string(),
-            b"Proof that this run was replayed and verified on-chain. Score {score}.".to_string(),
-            { let mut u = copy base; u.append(b"receipt.svg".to_string()); u },
-        ],
-    );
-    display_registry::share(r);
-    transfer::public_transfer(rcap, ctx.sender());
-
-    let (mut a, acap) = display_registry::new_with_publisher<Achievement>(registry, publisher, ctx);
-    fill(&mut a, &acap,
-        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
-        vector[
-            b"{name}".to_string(),
-            b"Soulbound Yeti achievement. It proves what this player did and cannot be traded.".to_string(),
-            { let mut u = copy base; u.append(b"achievement-{kind}.svg".to_string()); u },
-        ],
-    );
-    display_registry::share(a);
-    transfer::public_transfer(acap, ctx.sender());
 }
 
 fun sort_desc(v: &mut vector<Entry>) {
@@ -252,7 +201,7 @@ fun add_points(reg: &mut Registry, player: address, pts: u64) {
 
 fun ensure_profile(reg: &mut Registry, player: address) {
     if (!reg.profiles.contains(player)) {
-        reg.profiles.add(player, Profile { points: 0, last_day: 0, streak: 0, welcomed: false, ach: 0 });
+        reg.profiles.add(player, Profile { points: 0, last_day: 0, streak: 0, welcomed: false });
     };
 }
 
@@ -282,23 +231,6 @@ fun mint_cosmetic(reg: &mut Registry, kind: u8, season: u64, to: address, ctx: &
         else if (kind == 2) (b"Glacier Armor".to_string(), b"Epic".to_string())
         else (b"Eternal Crown".to_string(), b"Legendary".to_string());
     transfer::public_transfer(Cosmetic { id: object::new(ctx), kind, name, rarity, season, serial }, to);
-}
-
-/// Mints a soulbound Achievement once per player (tracked as a bitmask on the player's Profile).
-fun grant_achievement(reg: &mut Registry, player: address, kind: u8, score: u64, ctx: &mut TxContext) {
-    ensure_profile(reg, player);
-    let p = reg.profiles.borrow_mut(player);
-    let bit = 1u64 << kind;
-    if ((p.ach & bit) != 0) return;
-    p.ach = p.ach | bit;
-    let name = if (kind == 0) b"First Ascent".to_string()
-        else if (kind == 1) b"Ice Survivor".to_string()
-        else if (kind == 2) b"Peak Performer".to_string()
-        else if (kind == 3) b"Yeti Legend".to_string()
-        else if (kind == 4) b"Scavenger".to_string()
-        else if (kind == 5) b"Hunter".to_string()
-        else b"Well Fed".to_string();
-    transfer::transfer(Achievement { id: object::new(ctx), kind, name, score }, player);
 }
 
 /// Spend reward points on a cosmetic (kinds 0-2). Limited kinds have a hard supply cap.
@@ -343,7 +275,7 @@ entry fun finalize_day(reg: &mut Registry, clock: &Clock, day: u64, ctx: &mut Tx
         add_points(reg, winners[j], pts[j]);
         j = j + 1;
     };
-    transfer::transfer(
+    transfer::public_transfer(
         Trophy { id: object::new(ctx), day, seed: daily_seed(day), score: top_score },
         winners[0],
     );
@@ -358,32 +290,23 @@ fun draw(rng: u64): u64 { (rng / 65536) % 10 }
 
 fun roll(rng: u64): u64 { (rng / 256) % 100 }
 
-/// Which lane the active item's meat floats in: 0 low, 1 middle, 2 high. Derived from the rng that made the item.
-fun lane(rng: u64): u64 { (rng / 1048576) % 3 }
-
-/// Is a yeti at height h in the given lane? Low = on the ground, middle = rising or falling, high = near the peak.
-fun in_lane(l: u64, h: u64): bool {
-    if (l == 0) h < 12 else if (l == 1) h >= 12 && h < 25 else h >= 25
-}
-
-/// 0 meat, 1 sentry, 2 drone. Mix depends on the stage the item starts in.
+/// 0 crate, 1 sentry, 2 drone. Mix depends on the stage the obstacle starts in.
 fun kind_for(r: u64, start: u64): u64 {
     let s = start / STAGE_TICKS;
     let stage = if (s > 3) 3 else s;
     if (stage == 0) {
         if (r < 70) 0 else 1
     } else if (stage == 1) {
-        if (r < 40) 0 else if (r < 75) 1 else 2
+        if (r < 35) 0 else if (r < 80) 1 else 2
     } else if (stage == 2) {
-        if (r < 35) 0 else if (r < 65) 1 else 2
+        if (r < 25) 0 else if (r < 55) 1 else 2
     } else {
-        if (r < 30) 0 else if (r < 60) 1 else 2
+        if (r < 20) 0 else if (r < 50) 1 else 2
     }
 }
 
 fun hp_for(kind: u64, start: u64): u64 {
-    // for meat, ehp 1 means "still there" and 0 means collected
-    if (kind == 1) { if (start >= STAGE_TICKS * 6) 3 else 2 } else 1
+    if (kind == 1) { if (start >= STAGE_TICKS * 6) 3 else 2 } else if (kind == 2) 1 else 0
 }
 
 fun new_state(seed: u64): SimState {
@@ -392,8 +315,9 @@ fun new_state(seed: u64): SimState {
     let kind = kind_for(roll(rng), start);
     SimState {
         rng, start, kind, ehp: hp_for(kind, start),
-        tick: 0, air: 0, passed: 0, kills: 0, hp: HP_MAX, inv: 0, cd: 0, dead: false, meat: 0,
+        tick: 0, air: 0, passed: 0, kills: 0, hp: HP_MAX, inv: 0, cd: 0, dead: false,
     }
+}
 }
 
 fun check_log(log: &vector<u16>) {
@@ -414,7 +338,7 @@ public fun state_over(st: &SimState): bool { st.dead || st.tick >= MAX_TICKS }
 
 /// Final score of a finished run. The health bonus only applies if the yeti survived the whole 3 hours.
 public fun state_score(run: &SimState): u64 {
-    let mut score = run.passed * 100 + run.tick + run.kills * 50 + run.meat * 25;
+    let mut score = run.passed * 100 + run.tick + run.kills * 50;
     if (!run.dead && run.tick >= MAX_TICKS) score = score + run.hp * 50;
     score
 }
@@ -439,7 +363,6 @@ fun advance(run: &mut SimState, jumps: &vector<u16>, shots: &vector<u16>) {
     let mut si = 0u64;
     let mut passed = run.passed;
     let mut kills = run.kills;
-    let mut meat = run.meat;
     let mut hp = run.hp;
     let mut inv = run.inv;
     let mut cd = run.cd;
@@ -467,17 +390,13 @@ fun advance(run: &mut SimState, jumps: &vector<u16>, shots: &vector<u16>) {
         };
         let h = if (air == 0) 0 else *vector::borrow(&PROFILE, air - 1);
         if (inv > 0) inv = inv - 1;
-        if (kind == 0 && ehp > 0 && tick >= start && tick <= start + 2 && in_lane(lane(rng), h)) {
-            ehp = 0;
-            meat = meat + 1;
-        };
         if (tick >= start && tick <= start + 2 && inv == 0) {
             let danger = if (kind == 0) {
-                false
+                h < 3
             } else if (ehp == 0) {
                 false
             } else if (kind == 1) {
-                true // sentries are too big to jump: only shooting them dead avoids the hit
+                true // guards are too big to jump: shoot them
             } else {
                 h >= 3
             };
@@ -510,7 +429,6 @@ fun advance(run: &mut SimState, jumps: &vector<u16>, shots: &vector<u16>) {
     run.air = air;
     run.passed = passed;
     run.kills = kills;
-    run.meat = meat;
     run.hp = hp;
     run.inv = inv;
     run.cd = cd;
@@ -528,13 +446,13 @@ public fun replay(seed: u64, jumps: &vector<u16>, shots: &vector<u16>): u64 {
 entry fun start_run(r: &Random, ctx: &mut TxContext) {
     let mut g = random::new_generator(r, ctx);
     let seed = (random::generate_u32(&mut g) as u64);
-    transfer::transfer(Run { id: object::new(ctx), seed, day: 0, st: new_state(seed), jumps: vector[], shots: vector[] }, ctx.sender());
+    transfer::transfer(Run { id: object::new(ctx), seed, day: 0, st: new_state(seed) }, ctx.sender());
 }
 
 /// Daily challenge: everyone who calls this on the same UTC day gets the same seed.
 entry fun start_daily_run(clock: &Clock, ctx: &mut TxContext) {
     let day = clock.timestamp_ms() / 86400000;
-    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day, st: new_state(daily_seed(day)), jumps: vector[], shots: vector[] }, ctx.sender());
+    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day, st: new_state(daily_seed(day)) }, ctx.sender());
 }
 
 /// Verifies one segment of the run. If the run is not over yet the Run is returned to the player for the
@@ -549,23 +467,11 @@ entry fun submit_run(
     claimed_score: u64,
     ctx: &mut TxContext,
 ) {
-    let Run { id, seed, day, mut st, jumps: mut all_jumps, shots: mut all_shots } = run;
-    let base = st.tick;
+    let Run { id, seed, day, mut st } = run;
     advance(&mut st, &jumps, &shots);
-    // remember the inputs as absolute ticks (stop once the cap is hit; such a run just won't be stored as a ghost)
-    let mut gi = 0;
-    while (gi < jumps.length() && all_jumps.length() + all_shots.length() < MAX_GHOST_LOG) {
-        all_jumps.push_back((base + (jumps[gi] as u64)) as u32);
-        gi = gi + 1;
-    };
-    gi = 0;
-    while (gi < shots.length() && all_jumps.length() + all_shots.length() < MAX_GHOST_LOG) {
-        all_shots.push_back((base + (shots[gi] as u64)) as u32);
-        gi = gi + 1;
-    };
     if (!state_over(&st)) {
         // Run continues: keep it (same object id) so the next segment can be submitted. claimed_score is ignored.
-        transfer::transfer(Run { id, seed, day, st, jumps: all_jumps, shots: all_shots }, ctx.sender());
+        transfer::transfer(Run { id, seed, day, st }, ctx.sender());
         return
     };
     id.delete();
@@ -580,9 +486,7 @@ entry fun submit_run(
     };
     if (board.entries.length() > MAX_ENTRIES) { board.entries.pop_back(); };
 
-    store_ghost(reg, 0, ctx.sender(), seed, score, &all_jumps, &all_shots);
     if (day > 0) {
-        store_ghost(reg, day, ctx.sender(), seed, score, &all_jumps, &all_shots);
         record_day(reg, day, ctx.sender(), score);
         award_daily(reg, ctx.sender(), day, st.tick >= SEG_TICKS);
     };
@@ -594,28 +498,7 @@ entry fun submit_run(
         mint_cosmetic(reg, 0, 0, ctx.sender(), ctx);
     };
 
-    // Soulbound achievements, each minted once per player.
-    grant_achievement(reg, ctx.sender(), 0, score, ctx);
-    if (st.tick >= 3 * STAGE_TICKS) grant_achievement(reg, ctx.sender(), 1, score, ctx);
-    if (score >= 10000) grant_achievement(reg, ctx.sender(), 2, score, ctx);
-    if (!st.dead && st.tick >= MAX_TICKS) grant_achievement(reg, ctx.sender(), 3, score, ctx);
-    // Food for the journey: raw meat collected in this run.
-    if (st.meat >= 15) grant_achievement(reg, ctx.sender(), 4, score, ctx);
-    if (st.meat >= 50) grant_achievement(reg, ctx.sender(), 5, score, ctx);
-    if (st.meat >= 120) grant_achievement(reg, ctx.sender(), 6, score, ctx);
-
-    transfer::transfer(Receipt { id: object::new(ctx), seed, score, day }, ctx.sender());
-}
-
-/// Keeps the player's best ghost for this day key (replaces it only if the new score is higher).
-fun store_ghost(reg: &mut Registry, day: u64, player: address, seed: u64, score: u64, jumps: &vector<u32>, shots: &vector<u32>) {
-    if (jumps.length() + shots.length() >= MAX_GHOST_LOG) return;
-    let key = GhostKey { day, player };
-    if (df::exists_(&reg.id, key)) {
-        if (df::borrow<GhostKey, GhostRec>(&reg.id, key).score >= score) return;
-        let _old: GhostRec = df::remove(&mut reg.id, key);
-    };
-    df::add(&mut reg.id, key, GhostRec { seed, score, jumps: *jumps, shots: *shots });
+    transfer::public_transfer(Receipt { id: object::new(ctx), seed, score, day }, ctx.sender());
 }
 
 /// Runs every segment in order and returns the final score (aborts if the run is not over at the end).
@@ -637,7 +520,7 @@ public fun init_for_testing(ctx: &mut TxContext) { init(PROOF_OF_RUN {}, ctx) }
 
 #[test_only]
 public fun daily_run_for_testing(day: u64, ctx: &mut TxContext) {
-    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day, st: new_state(daily_seed(day)), jumps: vector[], shots: vector[] }, ctx.sender());
+    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day, st: new_state(daily_seed(day)) }, ctx.sender());
 }
 
 #[test_only]
