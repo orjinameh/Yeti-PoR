@@ -333,13 +333,23 @@ function crate0(ctx: Ctx, x: number): void {
   glow(ctx, x + OB_W / 2, G - 11, 30, "rgba(90,220,255,A)", 0.4);
 }
 
+/** extra visual height (native units, before SENTRY_SCALE) so a sentry towers above the highest jump */
+export const SENTRY_LIFT = 40;
+
 function sentry0(ctx: Ctx, x: number, t: number, hp: number, flash: number): void {
   const cx = x + OB_W / 2;
+  const L = SENTRY_LIFT;
   ctx.fillStyle = "rgba(10,20,45,0.3)";
   ctx.beginPath(); ctx.ellipse(cx, G + 2, 30, 5, 0, 0, TAU); ctx.fill();
   rr(ctx, x - 2, G - 14, OB_W + 4, 14, 7); ctx.fillStyle = "#222a44"; ctx.fill();
   ctx.fillStyle = "#5b6a92";
   for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.arc(x + 6 + i * ((OB_W - 12) / 4), G - 7, 3.5, 0, TAU); ctx.fill(); }
+  // tower body from the base up to the torso
+  rr(ctx, x + 8, G - 27 - L, OB_W - 16, L + 16, 5); ctx.fillStyle = vgrad(ctx, G - 27 - L, G - 11, [[0, "#6d7da6"], [1, "#2f3a5c"]]); ctx.fill();
+  ctx.fillStyle = "#3a4668";
+  for (let i = 1; i < 4; i++) { rr(ctx, x + 8, G - 27 - L + i * (L / 4), OB_W - 16, 3, 1.5); ctx.fill(); }
+  ctx.save();
+  ctx.translate(0, -L);
   rr(ctx, x + 2, G - 27, OB_W - 4, 16, 8); ctx.fillStyle = vgrad(ctx, G - 27, G - 11, [[0, "#a9b9d8"], [1, "#5d6d95"]]); ctx.fill();
   rr(ctx, x + 6, G - 20, OB_W - 12, 4, 2); ctx.fillStyle = "#ff9a4d"; ctx.fill();
   ctx.beginPath(); ctx.arc(cx, G - 26, 14, Math.PI, 0); ctx.closePath();
@@ -352,7 +362,8 @@ function sentry0(ctx: Ctx, x: number, t: number, hp: number, flash: number): voi
     ctx.fillStyle = "rgba(60,70,90,0.5)";
     ctx.beginPath(); ctx.arc(cx + 8 + Math.sin(t * 6) * 2, G - 46 - ((t * 20) % 10), 4, 0, TAU); ctx.fill();
   }
-  if (flash > 0) { rr(ctx, x - 2, G - 41, OB_W + 4, 41, 11); ctx.fillStyle = `rgba(255,255,255,${flash * 0.8})`; ctx.fill(); }
+  ctx.restore();
+  if (flash > 0) { rr(ctx, x - 2, G - 41 - L, OB_W + 4, 41 + L, 11); ctx.fillStyle = `rgba(255,255,255,${flash * 0.8})`; ctx.fill(); }
 }
 
 // Ground obstacles are drawn large (like the big floor enemies in EMB). Scaling is visual only; hit boxes are unchanged.
@@ -396,7 +407,7 @@ export function drawDrone(ctx: Ctx, x: number, t: number, flash: number, danger:
 }
 
 export const enemyCenter = (kind: number, x: number): [number, number] =>
-  kind === 2 ? [x + OB_W / 2, DRONE_Y] : [x + OB_W / 2, G - 24 * SENTRY_SCALE];
+  kind === 2 ? [x + OB_W / 2, DRONE_Y] : [x + OB_W / 2, G - (24 + SENTRY_LIFT) * SENTRY_SCALE];
 
 // ---------- the yeti: Subject Y-7 (original design) ----------
 export type YetiPose = {
