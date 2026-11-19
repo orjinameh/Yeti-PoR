@@ -2,7 +2,7 @@
 import { PointerEvent as RPointerEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useCurrentAccount, useCurrentClient, useDAppKit, useWallets } from "@mysten/dapp-kit-react";
 import { Transaction } from "@mysten/sui/transactions";
-import { findNewRun, readDayBoard, readLeaderboard, readProfilePoints, readRegistryTables, readSeason, waitTx, describeCreated, readRunTick } from "@/lib/chain";
+import { findNewRun, readDayBoard, readLeaderboard, readProfilePoints, readRegistryTables, readSeason, waitTx, describeCreated, readRunTick, readMyItems, readGhost, type OwnedItem } from "@/lib/chain";
 import Game, { Done, Ghost } from "./Game";
 import { Icon, Mark } from "./icons";
 import type { Runner } from "@/lib/runner.ts";
@@ -11,16 +11,19 @@ import { replay } from "@/lib/engine.ts";
 import { audio } from "@/lib/audio.ts";
 import { dailySeed, utcDay, msUntilNextDay, fmtCountdown } from "@/lib/daily.ts";
 import { encodeGhost, parseGhost, loadBest, saveBest } from "@/lib/ghost.ts";
+import { addRun, markVerified, loadHistory, bestRun, ghostOf, shareLink, extractCode, type RunRecord } from "@/lib/history.ts";
 import { STAGES } from "@/lib/art.ts";
 import { splitSegments, SEG_TICKS } from "@/lib/engine.ts";
 
-type Screen = "boot" | "story" | "title" | "loading" | "run" | "pause" | "result" | "board" | "ghost";
+type Screen = "boot" | "story" | "title" | "loading" | "run" | "pause" | "result" | "board" | "ghost" | "history";
 type Mode = "daily" | "free";
 type Session = { key: number; seed: bigint; runId: string | null; verified: boolean; ghost: Ghost | null; label: string };
 type Result = Done & { newBest: boolean; localOk: boolean };
 type Entry = { ok: boolean; msg: string; digest?: string };
 type Row = { player: string; score: string };
 type Tab = "all" | "today" | "season";
+type HTab = "runs" | "items";
+const explorerObj = (id: string) => `https://suiscan.xyz/testnet/object/${id}`;
 
 const explorer = (d: string) => `https://suiscan.xyz/testnet/tx/${d}`;
 const short = (a: string) => `${a.slice(0, 6)}...${a.slice(-4)}`;
@@ -34,7 +37,8 @@ async function retry<T>(fn: () => Promise<T>, tries = 6, ms = 700): Promise<T> {
 }
 const TIPS = [
   "Hold FIRE to auto-aim. Shots have a short cooldown.",
-  "Crates cannot be shot. Jump them.",
+  "Raw meat floats low, middle or high. Jump to the right height to grab it.",
+  "Sentries are too big to jump. Shoot them down.",
   "Drones only hurt you in the air. Stay low or shoot them.",
   "Clearing a stage with health left adds to your score.",
   "Your best run on a seed comes back as a ghost.",
@@ -94,6 +98,12 @@ export default function Console() {
   const [now, setNow] = useState<number | null>(null);
   const [toast, setToast] = useState("");
   const [ghostCode, setGhostCode] = useState("");
+  const [hTab, setHTab] = useState<HTab>("runs");
+  const [runs, setRuns] = useState<RunRecord[]>([]);
+  const [items, setItems] = useState<OwnedItem[] | null>(null);
+  const [itemsBusy, setItemsBusy] = useState(false);
+  const lastRunId = useRef<string | null>(null);
+  const pendingGhost = useRef<string | null>(null);
   const [loadPct, setLoadPct] = useState(0);
   const [loadMsg, setLoadMsg] = useState("");
   const [tip, setTip] = useState(0);
@@ -165,6 +175,21 @@ export default function Console() {
     if (screen !== "title") return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
+  }, [screen]);
+
+  // ---------- shared ghost links (?g=YG2:...) ----------
+  useEffect(() => {
+    try {
+      const g = new URLSearchParams(window.location.search).get("g");
+      if (g) { pendingGhost.current = g; window.history.replaceState(null, "", window.location.pathname); }
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    if (screen === "title" && pendingGhost.current) {
+      const g = pendingGhost.current;
+      pendingGhost.current = null;
+      setGhostCode(g); setBack("title"); setScreen("ghost");
+    }
   }, [screen]);
 
   // ---------- sessions ----------
@@ -260,6 +285,7 @@ export default function Console() {
     const s = sessionRef.current;
     if (!s) return;
     const newBest = saveBest(s.seed, d.score, d.jumps, d.shots);
+    lastRunId.current = addRun({ seed: s.seed.toString(), score: d.score, jumps: d.jumps, shots: d.shots, ticks: d.ticks, mode: st.current.mode });
     setResult({ ...d, newBest, localOk: replay(s.seed, d.jumps, d.shots) === d.score });
     try { localStorage.setItem("yeti:tut", "1"); } catch { /* ignore */ }
     setTutDone(true);
@@ -275,6 +301,7 @@ export default function Console() {
       // Long runs are verified one 1,800-tick segment per transaction; the last segment carries the score.
       const segs = splitSegments(result.jumps, result.shots, result.ticks);
       let earned: string[] = [];
+      let lastDigest = "";
       // resume after an interrupted or rejected submit: skip segments the chain has already verified
       const from = Math.min(segs.length - 1, Math.floor((await readRunTick(client, s.runId)) / SEG_TICKS));
       for (let i = from; i < segs.length; i++) {
@@ -289,10 +316,12 @@ export default function Console() {
         const r = await waitTx(client, digest);
         if (!r.ok) { push({ ok: false, msg: `Rejected on-chain (part ${i + 1}/${segs.length}): ${r.error}`, digest }); setSubMsg(""); setBusy(false); return; }
         if (last) {
+          lastDigest = digest;
           earned = await describeCreated(client, r.created);
           push({ ok: true, msg: `Verified on-chain. Score ${claimed}.${earned.length ? " You received: " + earned.join("; ") + "." : ""}`, digest });
         }
       }
+      markVerified(lastRunId.current, lastDigest);
       setEarned(earned);
       setSubMsg("");
       setSubmitted(true); setSession({ ...s, runId: null }); audio.win(); loadBoard();
@@ -356,10 +385,19 @@ export default function Console() {
   };
 
   // ---------- navigation ----------
-  const open = (to: "board" | "ghost") => {
+  const loadItems = useCallback(async () => {
+    if (!acct || !PACKAGE_ID) { setItems(null); return; }
+    setItemsBusy(true);
+    try { setItems(await retry(() => readMyItems(client, acct.address, PACKAGE_ID), 3, 600)); }
+    catch { setItems([]); flash("Could not read the chain, try again"); }
+    setItemsBusy(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, acct]);
+  const open = (to: "board" | "ghost" | "history") => {
     audio.unlock(); audio.click();
     setBack(st.current.screen === "result" ? "result" : "title");
     if (to === "board") loadBoard();
+    if (to === "history") { setRuns(loadHistory()); loadBoard(); loadItems(); }
     setScreen(to);
   };
   const goTitle = () => {
@@ -420,13 +458,56 @@ export default function Console() {
     copy(encodeGhost(s.seed, b.jumps, b.shots), "Ghost code copied");
   };
   const importGhost = () => {
-    const g = parseGhost(ghostCode);
+    const g = parseGhost(extractCode(ghostCode));
     if (!g) return flash("That ghost code is not valid");
     saveBest(g.seed, g.score, g.jumps, g.shots);
     newSession(BigInt(g.seed), `GHOST MATCH - TARGET ${g.score}`);
     setGhostCode("");
     flash(`Ghost loaded. Score ${g.score} re-computed locally.`);
     setScreen("title");
+  };
+
+  const shareGhost = async (code: string, score: number) => {
+    const url = shareLink(code);
+    const text = `Beat my Yeti run (${score.toLocaleString()} pts)!`;
+    try {
+      if (typeof navigator !== "undefined" && (navigator as any).share) {
+        await (navigator as any).share(url ? { title: "Yeti Proof-of-Run ghost", text, url } : { title: "Yeti Proof-of-Run ghost", text: `${text}\n${code}` });
+        return;
+      }
+    } catch (e: any) { if (e?.name === "AbortError") return; }
+    copy(url ?? code, url ? "Share link copied" : "Ghost code copied");
+  };
+  const pasteGhost = async () => {
+    try { setGhostCode((await navigator.clipboard.readText()).trim()); }
+    catch { flash("Paste blocked. Long-press the box and choose Paste."); }
+  };
+  const raceRun = (r: RunRecord) => {
+    audio.click();
+    saveBest(r.seed, r.score, r.jumps, r.shots);
+    newSession(BigInt(r.seed), `GHOST MATCH - TARGET ${r.score}`);
+    flash(`Ghost loaded. Beat ${r.score.toLocaleString()}.`);
+    setScreen("title");
+  };
+
+  // ---------- challenge a leaderboard player's ghost ----------
+  const challenge = async (player: string) => {
+    if (!REGISTRY_ID || !PACKAGE_ID) return flash("Contract not configured yet");
+    audio.click();
+    setBusy(true);
+    try {
+      const day = tab === "today" ? utcDay(Date.now()) : 0;
+      const raw = await readGhost(client, REGISTRY_ID, PACKAGE_ID, day, player);
+      if (!raw) return flash("No ghost stored for this player. Only runs submitted on the current contract have one.");
+      const g = parseGhost(encodeGhost(BigInt(raw.seed), raw.jumps, raw.shots)); // re-computes the score by replaying
+      if (!g) return flash("That ghost could not be replayed");
+      saveBest(g.seed, g.score, g.jumps, g.shots);
+      newSession(BigInt(g.seed), `CHALLENGE ${short(player)} - TARGET ${g.score}`);
+      flash(`Ghost loaded. Beat ${g.score.toLocaleString()}.`);
+      setScreen("title");
+    } catch (e: any) {
+      flash(`Could not load the ghost: ${e?.message ?? e}`);
+    } finally { setBusy(false); }
   };
 
   // ---------- sound keys ----------
@@ -460,7 +541,7 @@ export default function Console() {
       }
       if (sc === "pause") { if (code === "Escape" || code === "KeyP" || code === "Enter") act.current.resumeRun(); return; }
       if (sc === "result") { if (code === "Enter") act.current.launch(); if (code === "Escape") act.current.goTitle(); return; }
-      if ((sc === "board" || sc === "ghost") && code === "Escape") setScreen(st.current.back);
+      if ((sc === "board" || sc === "ghost" || sc === "history") && code === "Escape") setScreen(st.current.back);
     };
     const ku = (e: KeyboardEvent) => { if (FIRE_KEYS.has(e.code)) { runnerRef.current?.fire(false); setPadFire(false); } };
     window.addEventListener("keydown", kd);
@@ -547,7 +628,7 @@ export default function Console() {
               <div className="t-left">
                 <div className="eyebrow">SUBJECT Y-7</div>
                 <h1>ESCAPE FROM<br />HALCYON</h1>
-                <p className="logline">Jump the crates, shoot the sentries, duck the drones. Every score is replayed and verified on Sui.</p>
+                <p className="logline">Escape Halcyon. Gather raw meat for the journey, shoot the sentries, duck the drones. Every score is replayed and verified on Sui.</p>
                 <div className="chips">
                   {mode === "daily" && now !== null && <span className="chip">DAY <b>{day}</b></span>}
                   {mode === "daily" && now !== null && <span className="chip">RESETS IN <b>{fmtCountdown(msUntilNextDay(now))}</b></span>}
@@ -567,6 +648,7 @@ export default function Console() {
                 <div className="mrow">
                   <button className="mbtn half" onClick={() => open("board")}><b>LEADERBOARD</b></button>
                   <button className="mbtn half" onClick={() => open("ghost")}><b>GHOST</b></button>
+                  <button className="mbtn half" onClick={() => open("history")}><b>HISTORY</b></button>
                 </div>
                 {acct ? (
                   <button className="mbtn slim" onClick={() => { audio.click(); disconnect(); }}><b>{short(acct.address)}</b><small>TAP TO DISCONNECT</small></button>
@@ -628,13 +710,14 @@ export default function Console() {
                   </div>
                   <div className="stats">
                     <div><span>TAKEDOWNS</span><b>{result.kills}</b></div>
+                    <div><span>MEAT</span><b>{result.meat}</b></div>
                     <div><span>HEALTH LEFT</span><b>{result.hp} / 5</b></div>
                     <div><span>LEVEL</span><b>{result.stage + 1}</b></div>
                     <div><span>DISTANCE</span><b>{Math.floor(result.ticks * 1.5)} M</b></div>
                   </div>
                 </div>
                 {earned.length > 0 && (
-                  <div className="status ok"><b>EARNED</b> {earned.join("  |  ")}. Find them in your wallet under collectibles.</div>
+                  <div className="status ok"><b>EARNED</b> {earned.join("  |  ")}. Achievements are soulbound (not tradable); cosmetics can be traded. See HISTORY.</div>
                 )}
                 {session.verified && session.runId && !submitted && (
                   <p className="note note-in">Verified runs mint a receipt. Your first verified run also gives a free Ice Shard, and daily runs earn reward points toward rarer cosmetics.{result.ticks > SEG_TICKS ? ` Long run: it is verified in ${Math.ceil(result.ticks / SEG_TICKS)} parts, one signature each.` : ""}</p>
@@ -677,11 +760,12 @@ export default function Console() {
                   const missing = tab === "all" ? !LEADERBOARD_ID : !REGISTRY_ID;
                   return (
                     <div className="table">
-                      <div className="tr th"><span>RANK</span><span>PLAYER</span><span>{unit}</span></div>
+                      <div className={`tr th ${tab !== "season" && REGISTRY_ID ? "ch" : ""}`}><span>RANK</span><span>PLAYER</span><span>{unit}</span>{tab !== "season" && REGISTRY_ID && <span />}</div>
                       {rows.length === 0 && <div className="tr empty"><span>{missing ? "Contract not configured yet." : tab === "season" ? "No points yet. Finalize a finished day to award them." : "No verified runs yet. Be the first."}</span></div>}
                       {rows.map((b, i) => (
-                        <div key={i} className={`tr ${acct && String(b.player) === acct.address ? "me" : ""}`}>
+                        <div key={i} className={`tr ${tab !== "season" && REGISTRY_ID ? "ch" : ""} ${acct && String(b.player) === acct.address ? "me" : ""}`}>
                           <span>{String(i + 1).padStart(2, "0")}</span><span>{short(String(b.player))}</span><span>{Number(b.score).toLocaleString()}</span>
+                          {tab !== "season" && REGISTRY_ID && <button className="chal" disabled={busy} onClick={() => challenge(String(b.player))}>CHALLENGE</button>}
                         </div>
                       ))}
                     </div>
@@ -698,6 +782,7 @@ export default function Console() {
                     <p className="note note-in">Eternal Crown (legendary, 100 max) is only granted to season winners and event champions.</p>
                   </div>
                 )}
+                {tab !== "season" && <p className="note note-in">Tap CHALLENGE to race a player's best verified ghost on its seed. Only runs submitted on the current contract have a ghost.</p>}
                 {tab === "today" && <p className="note note-in">Daily boards keep each player's best verified score. Winners of finished days earn season points (5 / 3 / 1) and a Trophy.</p>}
                 <div className="p-foot">
                   <button className="mbtn" onClick={() => { audio.click(); setScreen(back); }}><b>BACK</b></button>
@@ -712,17 +797,165 @@ export default function Console() {
               <div className="panel">
                 <div className="p-head"><h2>GHOST RACING</h2><span>RACE ANY RUN ON ITS OWN SEED</span></div>
                 <div className="p-body col">
-                  <p className="note">Your best run on a seed replays as a see-through ghost the next time you play that seed. Share a code and a friend races your exact run. The score is re-computed here when a code is imported, so a code cannot lie.</p>
+                  <p className="note">Your best run on a seed replays as a see-through ghost the next time you play that seed. To share one: finish a run, then tap COPY GHOST (or open HISTORY, pick any run, and tap COPY or SHARE). Send the code or link to a friend. To race one: paste the code or link below. The score is re-computed here on import, so a code cannot lie.</p>
                   <input className="field" placeholder="Paste a ghost code (YG2:...)" value={ghostCode} onChange={(e) => setGhostCode(e.target.value)} spellCheck={false} />
                 </div>
                 <div className="p-foot">
                   <button className="mbtn primary" disabled={!ghostCode} onClick={importGhost}><b>RACE THIS GHOST</b></button>
+                  <button className="mbtn" onClick={pasteGhost}><b>PASTE</b></button>
                   <button className="mbtn" onClick={copyBest}><b>COPY MY BEST</b></button>
+                  <button className="mbtn" onClick={() => open("history")}><b>HISTORY</b></button>
                   <button className="mbtn" onClick={() => { audio.click(); setScreen(back); }}><b>BACK</b></button>
                 </div>
               </div>
             </div>
           )}
+
+          {screen === "history" && (() => {
+            const best = bestRun(runs);
+            const bestChain = (items ?? []).filter((i) => i.kind === "receipt").reduce<number>((m, i) => Math.max(m, i.score ?? 0), 0);
+            const localFor = (i: OwnedItem) => runs.find((r) => r.seed === i.seed && r.score === i.score);
+            return (
+              <div className="ov dim">
+                <div className="panel">
+                  <div className="p-head"><h2>HISTORY</h2><span>YOUR RUNS, GHOSTS AND ON-CHAIN COLLECTIBLES</span></div>
+                  <div className="tabs">
+                    {(["runs", "items"] as HTab[]).map((t) => (
+                      <button key={t} className={`tab ${hTab === t ? "on" : ""}`} onClick={() => { audio.click(); setHTab(t); if (t === "items" && items === null) loadItems(); }}>
+                        {t === "runs" ? "MY RUNS" : "ON-CHAIN"}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="hlist">
+                    {hTab === "runs" && (
+                      <>
+                        {best && (
+                          <div className="hcard best">
+                            <div><small>BEST RUN</small><b>{best.score.toLocaleString()}</b><em>seed {best.seed} - {best.ticks} ticks</em></div>
+                            <div className="hbtns">
+                              <button className="mbtn half" onClick={() => copy(ghostOf(best), "Ghost code copied")}><b>COPY GHOST</b></button>
+                              <button className="mbtn half" onClick={() => shareGhost(ghostOf(best), best.score)}><b>SHARE</b></button>
+                              <button className="mbtn half" onClick={() => raceRun(best)}><b>RACE</b></button>
+                            </div>
+                          </div>
+                        )}
+                        {runs.length === 0 && <div className="tr empty"><span>No runs on this device yet. Finish a run and it shows up here with its ghost code.</span></div>}
+                        {runs.map((r) => (
+                          <div key={r.id} className="hrow">
+                            <div className="hmain">
+                              <b>{r.score.toLocaleString()}</b>
+                              <span>{new Date(r.t).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} - {r.mode === "daily" ? "daily" : "free"}</span>
+                              {r.verified && <i className="vbadge">VERIFIED{r.digest && <> <a href={explorer(r.digest)} target="_blank" rel="noreferrer">TX</a></>}</i>}
+                            </div>
+                            <div className="hbtns">
+                              <button className="mbtn half" onClick={() => copy(ghostOf(r), "Ghost code copied")}><b>COPY</b></button>
+                              <button className="mbtn half" onClick={() => shareGhost(ghostOf(r), r.score)}><b>SHARE</b></button>
+                              <button className="mbtn half" onClick={() => raceRun(r)}><b>RACE</b></button>
+                            </div>
+                          </div>
+                        ))}
+                        <p className="note">History is stored on this device only. Ghost codes are the only way to move a run to another device.</p>
+                      </>
+                    )}
+                    {hTab === "items" && (
+                      <>
+                        {!acct && <div className="tr empty"><span>Connect a wallet to see your receipts, trophies and collectibles.</span></div>}
+                        {acct && (
+                          <div className="hcard best">
+                            <div><small>ON-CHAIN BEST</small><b>{bestChain ? bestChain.toLocaleString() : "-"}</b><em>{myPoints !== null ? `${myPoints} reward points` : "verified runs only"}</em></div>
+                            <div className="hbtns">
+                              <a className="mbtn half" href={`https://suiscan.xyz/testnet/account/${acct.address}`} target="_blank" rel="noreferrer"><b>MY WALLET</b></a>
+                              <button className="mbtn half" disabled={itemsBusy} onClick={loadItems}><b>{itemsBusy ? "READING..." : "REFRESH"}</b></button>
+                            </div>
+                          </div>
+                        )}
+                        {acct && itemsBusy && items === null && <div className="tr empty"><span>Reading the chain...</span></div>}
+                        {acct && items !== null && items.length === 0 && !itemsBusy && <div className="tr empty"><span>Nothing yet. Submit a verified run to mint a receipt.</span></div>}
+                        {acct && items !== null && (() => {
+                          const ACH: [string, string][] = [
+                            ["First Ascent", "Finish your first verified run"],
+                            ["Ice Survivor", "Survive to level 3"],
+                            ["Peak Performer", "Score 10,000 in one run"],
+                            ["Yeti Legend", "Escape Halcyon: survive the full 3 hours"],
+                            ["Scavenger", "Collect 15 raw meat in one run"],
+                            ["Hunter", "Collect 50 raw meat in one run"],
+                            ["Well Fed", "Collect 120 raw meat in one run"],
+                          ];
+                          const COSM: [string, string, string][] = [
+                            ["Ice Shard", "Common", "5 pts in the shop, or your first verified run"],
+                            ["Frozen Helm", "Rare", "25 pts in the shop, 5,000 max"],
+                            ["Glacier Armor", "Epic", "60 pts in the shop, 1,000 max"],
+                            ["Eternal Crown", "Legendary", "Season winners and event champions, 100 max"],
+                          ];
+                          const got = new Map(items.filter((i) => i.kind === "achievement").map((i) => [i.ach, i] as const));
+                          const proofs = items.filter((i) => i.kind === "receipt" || i.kind === "trophy");
+                          const coll = items.filter((i) => i.kind === "cosmetic");
+                          const row = (i: OwnedItem) => {
+                            const local = i.kind === "receipt" || i.kind === "trophy" ? localFor(i) : undefined;
+                            return (
+                              <div key={i.id} className="hrow">
+                                <div className="hmain">
+                                  <b>{i.title}</b>
+                                  <span>{i.detail}</span>
+                                  <i className="vbadge">{i.soulbound ? "SOULBOUND - NOT TRADABLE" : "TRADABLE"}</i>
+                                </div>
+                                <div className="hbtns">
+                                  <a className="mbtn half" href={explorerObj(i.id)} target="_blank" rel="noreferrer"><b>EXPLORER</b></a>
+                                  {i.digest && <a className="mbtn half" href={explorer(i.digest)} target="_blank" rel="noreferrer"><b>TX</b></a>}
+                                  {local && <button className="mbtn half" onClick={() => copy(ghostOf(local), "Ghost code copied")}><b>COPY GHOST</b></button>}
+                                </div>
+                              </div>
+                            );
+                          };
+                          return (
+                            <>
+                              <p className="tier">TIER 1 - ACHIEVEMENTS <i>SOULBOUND, CANNOT BE TRADED</i></p>
+                              <div className="badges">
+                                {ACH.map(([n, d], k) => {
+                                  const g = got.get(k);
+                                  return (
+                                    <div key={n} className={`badge ${g ? "got" : ""}`}>
+                                      <b>{n}</b>
+                                      <span>{d}</span>
+                                      {g ? <a href={explorerObj(g.id)} target="_blank" rel="noreferrer">UNLOCKED - EXPLORER</a> : <em>LOCKED</em>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              {proofs.length > 0 && <p className="tier">RUN PROOFS <i>SOULBOUND</i></p>}
+                              {proofs.map(row)}
+                              <p className="tier">TIER 2 - COLLECTIBLES <i>COSMETICS, TRADABLE</i></p>
+                              <div className="badges">
+                                {COSM.map(([n, rarity, how], k) => {
+                                  const mine = coll.filter((c) => c.ckind === k);
+                                  return (
+                                    <div key={n} className={`badge ${mine.length ? "got" : ""}`}>
+                                      <b>{n}</b>
+                                      <span>{rarity} - {how}</span>
+                                      {mine.length
+                                        ? <a href={explorerObj(mine[0].id)} target="_blank" rel="noreferrer">OWNED{mine.length > 1 ? ` x${mine.length}` : ""} - EXPLORER</a>
+                                        : <em>LOCKED</em>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              {coll.length > 0 && <p className="tier">YOUR COLLECTIBLES <i>TRADABLE</i></p>}
+                              {coll.map(row)}
+                            </>
+                          );
+                        })()}
+                        <p className="note">Achievements, receipts and trophies are soulbound: they prove what you did and can never be sold or sent. Cosmetics are the tradable tier. A ghost can only be copied for runs played on this device.</p>
+                      </>
+                    )}
+                  </div>
+                  <div className="p-foot">
+                    <button className="mbtn" onClick={() => { audio.click(); setScreen(back); }}><b>BACK</b></button>
+                    <button className="mbtn" onClick={() => open("ghost")}><b>GHOST RACING</b></button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {toast && <div className="toast">{toast}</div>}
         </main>

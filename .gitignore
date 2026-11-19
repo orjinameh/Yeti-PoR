@@ -3,3 +3,5 @@ node_modules
 .env.local
 move/build
 .vercel
+.publish-backup
+.env.local.bak
