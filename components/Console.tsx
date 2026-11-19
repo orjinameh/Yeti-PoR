@@ -1,13 +1,12 @@
 "use client";
 import { PointerEvent as RPointerEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { useCurrentAccount, useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
-import { ConnectButton } from "@mysten/dapp-kit-react/ui";
+import { useCurrentAccount, useCurrentClient, useDAppKit, useWallets } from "@mysten/dapp-kit-react";
 import { Transaction } from "@mysten/sui/transactions";
 import { findNewRun, readDayBoard, readLeaderboard, readProfilePoints, readRegistryTables, readSeason, waitTx } from "@/lib/chain";
 import Game, { Done, Ghost } from "./Game";
 import { Icon, Mark } from "./icons";
 import type { Runner } from "@/lib/runner.ts";
-import { PACKAGE_ID, LEADERBOARD_ID, REGISTRY_ID, RANDOM_ID, CLOCK_ID, MODULE, GRPC_URL } from "@/lib/config";
+import { PACKAGE_ID, LEADERBOARD_ID, REGISTRY_ID, RANDOM_ID, CLOCK_ID, MODULE } from "@/lib/config";
 import { replay } from "@/lib/engine.ts";
 import { audio } from "@/lib/audio.ts";
 import { dailySeed, utcDay, msUntilNextDay, fmtCountdown } from "@/lib/daily.ts";
@@ -112,17 +111,16 @@ export default function Console() {
 
   const push = (e: Entry) => setLog((l) => [e, ...l].slice(0, 6));
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2400); };
-  const [rpcMsg, setRpcMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  // real reachability test from this browser to the configured Sui RPC (for devices with no console)
-  const checkRpc = async () => {
-    const where = GRPC_URL;
-    setRpcMsg({ ok: true, text: "Checking..." });
-    const t0 = performance.now();
+  // wallet picker: our own styled button instead of the library's connect button
+  const wallets: any[] = (useWallets() as any[]) ?? [];
+  const [picking, setPicking] = useState(false);
+  const connectWallet = async (wallet: any) => {
+    audio.click();
     try {
-      await client.getObject({ objectId: CLOCK_ID }); // the shared Clock object always exists
-      setRpcMsg({ ok: true, text: `Sui gRPC reachable in ${Math.round(performance.now() - t0)} ms. (${where})` });
+      await dAppKit.connectWallet({ wallet });
+      setPicking(false);
     } catch (e: any) {
-      setRpcMsg({ ok: false, text: `RPC NOT reachable from this browser: ${e?.message ?? e}. (${where})` });
+      push({ ok: false, msg: `Could not connect ${wallet?.name ?? "wallet"}: ${e?.message ?? e}` });
     }
   };
 
@@ -541,8 +539,6 @@ export default function Console() {
                 {log[0] && !log[0].ok && (
                   <div className="status bad" style={{ marginTop: 10, wordBreak: "break-word", userSelect: "text" }}>{log[0].msg}</div>
                 )}
-                <button className="mbtn slim" style={{ marginTop: 10 }} onClick={() => { audio.click(); checkRpc(); }}><b>NETWORK CHECK</b><small>Test the Sui RPC from this device</small></button>
-                {rpcMsg && <div className={`status ${rpcMsg.ok ? "ok" : "bad"}`} style={{ marginTop: 8, wordBreak: "break-word", userSelect: "text" }}>{rpcMsg.text}</div>}
               </div>
               <nav className="t-menu">
                 <button className="mbtn primary" onClick={() => launch(false)}><b>RUN</b><small>Practice. Free, no wallet.</small></button>
@@ -558,7 +554,11 @@ export default function Console() {
                   <button className="mbtn slim" onClick={() => { audio.click(); disconnect(); }}><b>{short(acct.address)}</b><small>TAP TO DISCONNECT</small></button>
                 ) : (
                   <>
-                    <ConnectButton />
+                    <button className="mbtn slim" onClick={() => { audio.click(); setPicking((p) => !p); }}><b>CONNECT WALLET</b><small>For verified runs</small></button>
+                    {picking && wallets.length === 0 && <p className="note note-in">No wallet found. Allow popups for this site, or open it in your wallet app's built-in browser.</p>}
+                    {picking && wallets.map((w) => (
+                      <button key={String(w.name)} className="mbtn slim" onClick={() => connectWallet(w)}><b>{String(w.name)}</b><small>Tap to connect</small></button>
+                    ))}
                     {isMobile && <p className="note note-in">On a phone: pick Slush (sign in with Google, Apple or a passkey), or open this page in your wallet app's built-in browser.</p>}
                   </>
                 )}
