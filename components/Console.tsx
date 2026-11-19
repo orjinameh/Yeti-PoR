@@ -112,7 +112,7 @@ export default function Console() {
   const [rpcMsg, setRpcMsg] = useState<{ ok: boolean; text: string } | null>(null);
   // real reachability test from this browser to the configured Sui RPC (for devices with no console)
   const checkRpc = async () => {
-    const where = process.env.NEXT_PUBLIC_SUI_RPC_URL || "default public testnet fullnode";
+    const where = process.env.NEXT_PUBLIC_SUI_RPC_URL || "this site's /api/sui-rpc proxy to the testnet fullnode";
     setRpcMsg({ ok: true, text: "Checking..." });
     const t0 = performance.now();
     try {

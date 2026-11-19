@@ -1,15 +1,22 @@
 "use client";
-import { ReactNode, useState } from "react";
+import { ReactNode, useMemo, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SuiClientProvider, WalletProvider } from "@mysten/dapp-kit";
 import { getFullnodeUrl } from "@mysten/sui/client";
 import "@mysten/dapp-kit/dist/index.css";
 
-// set NEXT_PUBLIC_SUI_RPC_URL to a dedicated testnet RPC if the public fullnode rate-limits you
-const networks = { testnet: { url: process.env.NEXT_PUBLIC_SUI_RPC_URL || getFullnodeUrl("testnet") } };
-
 export default function Providers({ children }: { children: ReactNode }) {
   const [qc] = useState(() => new QueryClient());
+  // In the browser, RPC calls go through this site's /api/sui-rpc proxy, because some devices/networks cannot reach
+  // fullnode.testnet.sui.io directly. Set NEXT_PUBLIC_SUI_RPC_URL to use a different RPC directly instead.
+  const networks = useMemo(
+    () => ({
+      testnet: {
+        url: process.env.NEXT_PUBLIC_SUI_RPC_URL || (typeof window !== "undefined" ? `${window.location.origin}/api/sui-rpc` : getFullnodeUrl("testnet")),
+      },
+    }),
+    [],
+  );
   return (
     <QueryClientProvider client={qc}>
       <SuiClientProvider networks={networks} defaultNetwork="testnet">
