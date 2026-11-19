@@ -4,7 +4,6 @@ module proof_of_run::proof_of_run;
 
 use std::string::String;
 use sui::clock::Clock;
-use sui::display;
 use sui::package;
 use sui::random::{Self, Random};
 use sui::table::{Self, Table};
@@ -98,47 +97,7 @@ public struct Trophy has key, store { id: UID, day: u64, seed: u64, score: u64 }
 
 fun init(otw: PROOF_OF_RUN, ctx: &mut TxContext) {
     let publisher = package::claim(otw, ctx);
-    let base: String = IMAGE_BASE.to_string();
-
-    let mut d = display::new_with_fields<Cosmetic>(
-        &publisher,
-        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string(), b"project_url".to_string()],
-        vector[
-            b"{name}".to_string(),
-            b"Yeti Proof-of-Run {rarity} cosmetic, edition #{serial}. Earned by playing verified runs.".to_string(),
-            { let mut u = copy base; u.append(b"cosmetic-{kind}.svg".to_string()); u },
-            b"https://github.com/orjinameh/Yeti-PoR".to_string(),
-        ],
-        ctx,
-    );
-    d.update_version();
-    transfer::public_transfer(d, ctx.sender());
-
-    let mut t = display::new_with_fields<Trophy>(
-        &publisher,
-        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
-        vector[
-            b"Daily Champion Trophy - day {day}".to_string(),
-            b"Won the verified Yeti daily challenge for day {day} with a score of {score}.".to_string(),
-            { let mut u = copy base; u.append(b"trophy.svg".to_string()); u },
-        ],
-        ctx,
-    );
-    t.update_version();
-    transfer::public_transfer(t, ctx.sender());
-
-    let mut r = display::new_with_fields<Receipt>(
-        &publisher,
-        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
-        vector[
-            b"Yeti Run Receipt".to_string(),
-            b"Proof that this run was replayed and verified on-chain. Score {score}.".to_string(),
-            { let mut u = copy base; u.append(b"receipt.svg".to_string()); u },
-        ],
-        ctx,
-    );
-    r.update_version();
-    transfer::public_transfer(r, ctx.sender());
+    // Sui Display V1 can no longer be created (it aborts on publish). Display V2 is added in a follow-up.
     transfer::public_transfer(publisher, ctx.sender());
 
     transfer::share_object(Leaderboard { id: object::new(ctx), entries: vector[] });
@@ -317,7 +276,6 @@ fun new_state(seed: u64): SimState {
         rng, start, kind, ehp: hp_for(kind, start),
         tick: 0, air: 0, passed: 0, kills: 0, hp: HP_MAX, inv: 0, cd: 0, dead: false,
     }
-}
 }
 
 fun check_log(log: &vector<u16>) {
