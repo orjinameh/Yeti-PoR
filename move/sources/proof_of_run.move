@@ -60,7 +60,8 @@ public struct SimState has store, copy, drop {
     dead: bool,
 }
 
-public struct Receipt has key, store { id: UID, seed: u64, score: u64, day: u64 }
+/// SOULBOUND (key only, no store): the module can mint it to a player but nobody can transfer or sell it.
+public struct Receipt has key { id: UID, seed: u64, score: u64, day: u64 }
 
 public struct Entry has copy, drop, store { player: address, score: u64 }
 
@@ -70,7 +71,7 @@ public struct Leaderboard has key { id: UID, entries: vector<Entry> }
 public struct DayBoard has store { entries: vector<Entry>, finalized: bool }
 
 /// Reward points are earned once per UTC day per player (first verified daily run), which stops farming.
-public struct Profile has store { points: u64, last_day: u64, streak: u64, welcomed: bool }
+public struct Profile has store { points: u64, last_day: u64, streak: u64, welcomed: bool, ach: u64 }
 
 public struct Registry has key {
     id: UID,
@@ -94,7 +95,13 @@ const IMAGE_BASE: vector<u8> = b"https://cdn.jsdelivr.net/gh/orjinameh/Yeti-PoR@
 
 
 /// Minted to the verified winner of a finished daily challenge.
-public struct Trophy has key, store { id: UID, day: u64, seed: u64, score: u64 }
+/// SOULBOUND (key only): proves the player won a daily challenge, so it can never be bought.
+public struct Trophy has key { id: UID, day: u64, seed: u64, score: u64 }
+
+/// SOULBOUND achievement badge (key only). Tier 1 of the collectibles; cosmetics are tier 2 and tradable.
+/// kind: 0 First Ascent (first verified run), 1 Ice Survivor (reach level 3), 2 Peak Performer (score 10,000+),
+/// 3 Yeti Legend (escape Halcyon: survive the full 3 hours). Each is minted once per player.
+public struct Achievement has key { id: UID, kind: u8, name: String, score: u64 }
 
 fun init(otw: PROOF_OF_RUN, ctx: &mut TxContext) {
     // Display V1 can no longer be created (it aborts), so wallet art is set up once after publish
@@ -126,8 +133,8 @@ fun fill<T>(
     };
 }
 
-/// One-time, after publish: creates the Display V2 objects (wallet name/art) for Cosmetic, Trophy and
-/// Receipt. Needs the Publisher (held by the deployer) and the system DisplayRegistry object 0xd.
+/// One-time, after publish: creates the Display V2 objects (wallet name/art) for Cosmetic, Trophy,
+/// Receipt and Achievement. Needs the Publisher (held by the deployer) and the system DisplayRegistry object 0xd.
 /// Each DisplayCap goes to the caller, so the art can be edited later. Aborts if already set up.
 entry fun setup_displays(
     registry: &mut DisplayRegistry,
@@ -172,6 +179,18 @@ entry fun setup_displays(
     );
     display_registry::share(r);
     transfer::public_transfer(rcap, ctx.sender());
+
+    let (mut a, acap) = display_registry::new_with_publisher<Achievement>(registry, publisher, ctx);
+    fill(&mut a, &acap,
+        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
+        vector[
+            b"{name}".to_string(),
+            b"Soulbound Yeti achievement. It proves what this player did and cannot be traded.".to_string(),
+            { let mut u = copy base; u.append(b"achievement-{kind}.svg".to_string()); u },
+        ],
+    );
+    display_registry::share(a);
+    transfer::public_transfer(acap, ctx.sender());
 }
 
 fun sort_desc(v: &mut vector<Entry>) {
@@ -223,7 +242,7 @@ fun add_points(reg: &mut Registry, player: address, pts: u64) {
 
 fun ensure_profile(reg: &mut Registry, player: address) {
     if (!reg.profiles.contains(player)) {
-        reg.profiles.add(player, Profile { points: 0, last_day: 0, streak: 0, welcomed: false });
+        reg.profiles.add(player, Profile { points: 0, last_day: 0, streak: 0, welcomed: false, ach: 0 });
     };
 }
 
@@ -253,6 +272,20 @@ fun mint_cosmetic(reg: &mut Registry, kind: u8, season: u64, to: address, ctx: &
         else if (kind == 2) (b"Glacier Armor".to_string(), b"Epic".to_string())
         else (b"Eternal Crown".to_string(), b"Legendary".to_string());
     transfer::public_transfer(Cosmetic { id: object::new(ctx), kind, name, rarity, season, serial }, to);
+}
+
+/// Mints a soulbound Achievement once per player (tracked as a bitmask on the player's Profile).
+fun grant_achievement(reg: &mut Registry, player: address, kind: u8, score: u64, ctx: &mut TxContext) {
+    ensure_profile(reg, player);
+    let p = reg.profiles.borrow_mut(player);
+    let bit = 1u64 << kind;
+    if ((p.ach & bit) != 0) return;
+    p.ach = p.ach | bit;
+    let name = if (kind == 0) b"First Ascent".to_string()
+        else if (kind == 1) b"Ice Survivor".to_string()
+        else if (kind == 2) b"Peak Performer".to_string()
+        else b"Yeti Legend".to_string();
+    transfer::transfer(Achievement { id: object::new(ctx), kind, name, score }, player);
 }
 
 /// Spend reward points on a cosmetic (kinds 0-2). Limited kinds have a hard supply cap.
@@ -297,7 +330,7 @@ entry fun finalize_day(reg: &mut Registry, clock: &Clock, day: u64, ctx: &mut Tx
         add_points(reg, winners[j], pts[j]);
         j = j + 1;
     };
-    transfer::public_transfer(
+    transfer::transfer(
         Trophy { id: object::new(ctx), day, seed: daily_seed(day), score: top_score },
         winners[0],
     );
@@ -519,7 +552,13 @@ entry fun submit_run(
         mint_cosmetic(reg, 0, 0, ctx.sender(), ctx);
     };
 
-    transfer::public_transfer(Receipt { id: object::new(ctx), seed, score, day }, ctx.sender());
+    // Soulbound achievements, each minted once per player.
+    grant_achievement(reg, ctx.sender(), 0, score, ctx);
+    if (st.tick >= 3 * STAGE_TICKS) grant_achievement(reg, ctx.sender(), 1, score, ctx);
+    if (score >= 10000) grant_achievement(reg, ctx.sender(), 2, score, ctx);
+    if (!st.dead && st.tick >= MAX_TICKS) grant_achievement(reg, ctx.sender(), 3, score, ctx);
+
+    transfer::transfer(Receipt { id: object::new(ctx), seed, score, day }, ctx.sender());
 }
 
 /// Runs every segment in order and returns the final score (aborts if the run is not over at the end).

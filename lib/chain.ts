@@ -7,7 +7,7 @@ const EntryBcs = bcs.struct("Entry", { player: bcs.Address, score: bcs.u64() });
 const LeaderboardBcs = bcs.struct("Leaderboard", { id: bcs.Address, entries: bcs.vector(EntryBcs) });
 const RegistryBcs = bcs.struct("Registry", { id: bcs.Address, days: TableBcs, season: TableBcs, profiles: TableBcs, minted: TableBcs });
 const DayBoardBcs = bcs.struct("DayBoard", { entries: bcs.vector(EntryBcs), finalized: bcs.bool() });
-const ProfileBcs = bcs.struct("Profile", { points: bcs.u64(), last_day: bcs.u64(), streak: bcs.u64(), welcomed: bcs.bool() });
+const ProfileBcs = bcs.struct("Profile", { points: bcs.u64(), last_day: bcs.u64(), streak: bcs.u64(), welcomed: bcs.bool(), ach: bcs.u64() });
 const SimStateBcs = bcs.struct("SimState", {
   rng: bcs.u64(), start: bcs.u64(), kind: bcs.u64(), ehp: bcs.u64(), tick: bcs.u64(), air: bcs.u64(),
   passed: bcs.u64(), kills: bcs.u64(), hp: bcs.u64(), inv: bcs.u64(), cd: bcs.u64(), dead: bcs.bool(),
@@ -104,7 +104,11 @@ export async function describeCreated(client: any, created: string[]): Promise<s
       } else if (c.type.endsWith("::Receipt")) {
         const x = ReceiptBcs.parse(c.bytes);
         out.push(`Run receipt, score ${x.score}`);
-      } else if (c.type.endsWith("::Trophy")) out.push("Daily champion trophy");
+      } else if (c.type.endsWith("::Trophy")) out.push("Daily champion trophy (soulbound)");
+      else if (c.type.endsWith("::Achievement")) {
+        const x = AchievementBcs.parse(c.bytes);
+        out.push(`Achievement unlocked: ${x.name} (soulbound)`);
+      }
     } catch { /* not readable, skip */ }
   }
   return out;
@@ -123,17 +127,20 @@ export async function readRunTick(client: any, runId: string): Promise<number> {
   }
 }
 
+const AchievementBcs = bcs.struct("Achievement", { id: bcs.Address, kind: bcs.u8(), name: bcs.string(), score: bcs.u64() });
 const TrophyBcs = bcs.struct("Trophy", { id: bcs.Address, day: bcs.u64(), seed: bcs.u64(), score: bcs.u64() });
 
 export type OwnedItem = {
-  id: string; kind: "receipt" | "trophy" | "cosmetic"; title: string; detail: string;
-  seed?: string; score?: number; digest?: string;
+  id: string; kind: "achievement" | "receipt" | "trophy" | "cosmetic"; title: string; detail: string;
+  seed?: string; score?: number; digest?: string; ach?: number;
+  /** soulbound items prove an achievement and cannot be traded; cosmetics are the tradable tier */
+  soulbound: boolean;
 };
 
 /** Everything the wallet owns from this package (receipts, trophies, cosmetics), read straight from the chain. */
 export async function readMyItems(client: any, owner: string, pkg: string): Promise<OwnedItem[]> {
   const out: OwnedItem[] = [];
-  for (const [kind, name] of [["receipt", "Receipt"], ["trophy", "Trophy"], ["cosmetic", "Cosmetic"]] as const) {
+  for (const [kind, name] of [["achievement", "Achievement"], ["receipt", "Receipt"], ["trophy", "Trophy"], ["cosmetic", "Cosmetic"]] as const) {
     let list: any;
     try { list = await client.listOwnedObjects({ owner, type: `${pkg}::proof_of_run::${name}` }); } catch { continue; }
     const objs = ((list?.objects ?? []) as any[]).slice(0, 40);
@@ -142,16 +149,20 @@ export async function readMyItems(client: any, owner: string, pkg: string): Prom
         const id = String(o.objectId);
         const c = await content(client, id);
         const digest = c.previousTransaction;
+        if (kind === "achievement") {
+          const x = AchievementBcs.parse(c.bytes);
+          return { id, kind, title: String(x.name), detail: `Soulbound, earned with score ${Number(x.score).toLocaleString()}`, score: Number(x.score), digest, ach: Number(x.kind), soulbound: true };
+        }
         if (kind === "receipt") {
           const x = ReceiptBcs.parse(c.bytes);
-          return { id, kind, title: `Run receipt - ${Number(x.score).toLocaleString()}`, detail: `Seed ${x.seed}, day ${x.day}`, seed: String(x.seed), score: Number(x.score), digest };
+          return { id, kind, title: `Run receipt - ${Number(x.score).toLocaleString()}`, detail: `Seed ${x.seed}, day ${x.day}`, seed: String(x.seed), score: Number(x.score), digest, soulbound: true };
         }
         if (kind === "trophy") {
           const x = TrophyBcs.parse(c.bytes);
-          return { id, kind, title: `Daily champion trophy - day ${x.day}`, detail: `Score ${Number(x.score).toLocaleString()}, seed ${x.seed}`, seed: String(x.seed), score: Number(x.score), digest };
+          return { id, kind, title: `Daily champion trophy - day ${x.day}`, detail: `Score ${Number(x.score).toLocaleString()}, seed ${x.seed}`, seed: String(x.seed), score: Number(x.score), digest, soulbound: true };
         }
         const x = CosmeticBcs.parse(c.bytes);
-        return { id, kind, title: String(x.name), detail: `${x.rarity}, edition #${x.serial}`, digest };
+        return { id, kind, title: String(x.name), detail: `${x.rarity}, edition #${x.serial}`, digest, soulbound: false };
       } catch { return null; }
     }));
     out.push(...rows.filter((r): r is OwnedItem => r !== null));

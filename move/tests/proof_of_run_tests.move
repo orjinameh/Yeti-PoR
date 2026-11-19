@@ -239,6 +239,7 @@ fun multi_segment_run_continues_then_finishes() {
     // finished: the player now holds a Receipt and the welcome Ice Shard
     sc.next_tx(a);
     assert!(ts::has_most_recent_for_address<proof_of_run::Receipt>(a));
+    assert!(ts::has_most_recent_for_address<proof_of_run::Achievement>(a));
     assert!(ts::has_most_recent_for_address<proof_of_run::Cosmetic>(a));
     sc.end();
 }

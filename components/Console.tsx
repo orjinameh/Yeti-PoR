@@ -695,7 +695,7 @@ export default function Console() {
                   </div>
                 </div>
                 {earned.length > 0 && (
-                  <div className="status ok"><b>EARNED</b> {earned.join("  |  ")}. Find them in your wallet under collectibles.</div>
+                  <div className="status ok"><b>EARNED</b> {earned.join("  |  ")}. Achievements are soulbound (not tradable); cosmetics can be traded. See HISTORY.</div>
                 )}
                 {session.verified && session.runId && !submitted && (
                   <p className="note note-in">Verified runs mint a receipt. Your first verified run also gives a free Ice Shard, and daily runs earn reward points toward rarer cosmetics.{result.ticks > SEG_TICKS ? ` Long run: it is verified in ${Math.ceil(result.ticks / SEG_TICKS)} parts, one signature each.` : ""}</p>
@@ -847,24 +847,57 @@ export default function Console() {
                         )}
                         {acct && itemsBusy && items === null && <div className="tr empty"><span>Reading the chain...</span></div>}
                         {acct && items !== null && items.length === 0 && !itemsBusy && <div className="tr empty"><span>Nothing yet. Submit a verified run to mint a receipt.</span></div>}
-                        {(items ?? []).map((i) => {
-                          const local = i.kind !== "cosmetic" ? localFor(i) : undefined;
+                        {acct && items !== null && (() => {
+                          const ACH: [string, string][] = [
+                            ["First Ascent", "Finish your first verified run"],
+                            ["Ice Survivor", "Survive to level 3"],
+                            ["Peak Performer", "Score 10,000 in one run"],
+                            ["Yeti Legend", "Escape Halcyon: survive the full 3 hours"],
+                          ];
+                          const got = new Map(items.filter((i) => i.kind === "achievement").map((i) => [i.ach, i] as const));
+                          const proofs = items.filter((i) => i.kind === "receipt" || i.kind === "trophy");
+                          const coll = items.filter((i) => i.kind === "cosmetic");
+                          const row = (i: OwnedItem) => {
+                            const local = i.kind === "receipt" || i.kind === "trophy" ? localFor(i) : undefined;
+                            return (
+                              <div key={i.id} className="hrow">
+                                <div className="hmain">
+                                  <b>{i.title}</b>
+                                  <span>{i.detail}</span>
+                                  <i className="vbadge">{i.soulbound ? "SOULBOUND - NOT TRADABLE" : "TRADABLE"}</i>
+                                </div>
+                                <div className="hbtns">
+                                  <a className="mbtn half" href={explorerObj(i.id)} target="_blank" rel="noreferrer"><b>EXPLORER</b></a>
+                                  {i.digest && <a className="mbtn half" href={explorer(i.digest)} target="_blank" rel="noreferrer"><b>TX</b></a>}
+                                  {local && <button className="mbtn half" onClick={() => copy(ghostOf(local), "Ghost code copied")}><b>COPY GHOST</b></button>}
+                                </div>
+                              </div>
+                            );
+                          };
                           return (
-                            <div key={i.id} className="hrow">
-                              <div className="hmain">
-                                <b>{i.title}</b>
-                                <span>{i.detail}</span>
-                                <i className="vbadge">{i.kind.toUpperCase()}</i>
+                            <>
+                              <p className="tier">TIER 1 - ACHIEVEMENTS <i>SOULBOUND, CANNOT BE TRADED</i></p>
+                              <div className="badges">
+                                {ACH.map(([n, d], k) => {
+                                  const g = got.get(k);
+                                  return (
+                                    <div key={n} className={`badge ${g ? "got" : ""}`}>
+                                      <b>{n}</b>
+                                      <span>{d}</span>
+                                      {g ? <a href={explorerObj(g.id)} target="_blank" rel="noreferrer">UNLOCKED - EXPLORER</a> : <em>LOCKED</em>}
+                                    </div>
+                                  );
+                                })}
                               </div>
-                              <div className="hbtns">
-                                <a className="mbtn half" href={explorerObj(i.id)} target="_blank" rel="noreferrer"><b>EXPLORER</b></a>
-                                {i.digest && <a className="mbtn half" href={explorer(i.digest)} target="_blank" rel="noreferrer"><b>TX</b></a>}
-                                {local && <button className="mbtn half" onClick={() => copy(ghostOf(local), "Ghost code copied")}><b>COPY GHOST</b></button>}
-                              </div>
-                            </div>
+                              {proofs.length > 0 && <p className="tier">RUN PROOFS <i>SOULBOUND</i></p>}
+                              {proofs.map(row)}
+                              <p className="tier">TIER 2 - COLLECTIBLES <i>COSMETICS, TRADABLE</i></p>
+                              {coll.length === 0 && <div className="tr empty"><span>No cosmetics yet. Earn reward points on daily runs and redeem them in the leaderboard shop.</span></div>}
+                              {coll.map(row)}
+                            </>
                           );
-                        })}
-                        <p className="note">Receipts and trophies prove a run was replay-verified on-chain. A ghost can only be copied for runs that were played on this device.</p>
+                        })()}
+                        <p className="note">Achievements, receipts and trophies are soulbound: they prove what you did and can never be sold or sent. Cosmetics are the tradable tier. A ghost can only be copied for runs played on this device.</p>
                       </>
                     )}
                   </div>
