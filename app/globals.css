@@ -215,3 +215,19 @@ button { font-family: inherit; color: inherit; }
 .shop .mbtn b { font-size: 12px; letter-spacing: 0.04em; }
 .shop .mbtn small { font-size: 9px; }
 .shop .mrow { width: auto; margin: 6px 22px; }
+
+/* history screen */
+.hlist { flex: 1; min-height: 0; overflow: auto; padding: calc(var(--s) * 1.2) calc(var(--s) * 2.4); display: flex; flex-direction: column; gap: calc(var(--s) * 0.7); }
+.hcard, .hrow { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--s) * 1.2); padding: calc(var(--s) * 1) calc(var(--s) * 1.4); border-radius: calc(var(--s) * 0.9); background: rgba(0, 0, 0, 0.28); flex-wrap: wrap; }
+.hcard.best { background: linear-gradient(180deg, rgba(98, 185, 232, 0.16), rgba(0, 0, 0, 0.3)); outline: 1px solid rgba(127, 212, 255, 0.4); }
+.hcard small { display: block; font-family: var(--pixel); font-size: max(7px, calc(var(--s) * 0.95)); letter-spacing: 0.16em; color: var(--warm); }
+.hcard b { display: block; font-family: var(--pixel); font-size: calc(var(--s) * 2.8); color: #fff; font-weight: 400; }
+.hcard em { font-style: normal; font-size: max(9px, calc(var(--s) * 1.1)); color: var(--dim); }
+.hmain { display: flex; flex-direction: column; gap: calc(var(--s) * 0.2); min-width: 0; }
+.hmain b { font-family: var(--pixel); font-size: max(10px, calc(var(--s) * 1.6)); font-weight: 400; word-break: break-word; }
+.hmain span { font-size: max(9px, calc(var(--s) * 1.1)); color: var(--dim); }
+.vbadge { font-style: normal; font-family: var(--pixel); font-size: max(7px, calc(var(--s) * 0.9)); letter-spacing: 0.12em; color: var(--ok); }
+.vbadge a { color: var(--ice); margin-left: 0.5em; }
+.hbtns { display: flex; gap: calc(var(--s) * 0.6); flex-wrap: wrap; }
+.hbtns .mbtn { min-height: calc(var(--s) * 3.2); padding: calc(var(--s) * 0.5) calc(var(--s) * 1.3); text-decoration: none; color: inherit; flex: 0 0 auto; }
+.hbtns .mbtn b { font-size: max(8px, calc(var(--s) * 1.05)); }

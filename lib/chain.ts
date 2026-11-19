@@ -122,3 +122,39 @@ export async function readRunTick(client: any, runId: string): Promise<number> {
     return 0; // could not read the state: start from the first segment, the contract rejects it clearly if that is wrong
   }
 }
+
+const TrophyBcs = bcs.struct("Trophy", { id: bcs.Address, day: bcs.u64(), seed: bcs.u64(), score: bcs.u64() });
+
+export type OwnedItem = {
+  id: string; kind: "receipt" | "trophy" | "cosmetic"; title: string; detail: string;
+  seed?: string; score?: number; digest?: string;
+};
+
+/** Everything the wallet owns from this package (receipts, trophies, cosmetics), read straight from the chain. */
+export async function readMyItems(client: any, owner: string, pkg: string): Promise<OwnedItem[]> {
+  const out: OwnedItem[] = [];
+  for (const [kind, name] of [["receipt", "Receipt"], ["trophy", "Trophy"], ["cosmetic", "Cosmetic"]] as const) {
+    let list: any;
+    try { list = await client.listOwnedObjects({ owner, type: `${pkg}::proof_of_run::${name}` }); } catch { continue; }
+    const objs = ((list?.objects ?? []) as any[]).slice(0, 40);
+    const rows = await Promise.all(objs.map(async (o): Promise<OwnedItem | null> => {
+      try {
+        const id = String(o.objectId);
+        const c = await content(client, id);
+        const digest = c.previousTransaction;
+        if (kind === "receipt") {
+          const x = ReceiptBcs.parse(c.bytes);
+          return { id, kind, title: `Run receipt - ${Number(x.score).toLocaleString()}`, detail: `Seed ${x.seed}, day ${x.day}`, seed: String(x.seed), score: Number(x.score), digest };
+        }
+        if (kind === "trophy") {
+          const x = TrophyBcs.parse(c.bytes);
+          return { id, kind, title: `Daily champion trophy - day ${x.day}`, detail: `Score ${Number(x.score).toLocaleString()}, seed ${x.seed}`, seed: String(x.seed), score: Number(x.score), digest };
+        }
+        const x = CosmeticBcs.parse(c.bytes);
+        return { id, kind, title: String(x.name), detail: `${x.rarity}, edition #${x.serial}`, digest };
+      } catch { return null; }
+    }));
+    out.push(...rows.filter((r): r is OwnedItem => r !== null));
+  }
+  return out;
+}
