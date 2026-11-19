@@ -1,13 +1,27 @@
-import { botLog, replay, Sim } from "../lib/engine.ts";
+import { botLog, replay, Sim, splitSegments } from "../lib/engine.ts";
 
 // Prints JSON test vectors for the Move tests. Re-run and paste into move/tests if you change the physics.
-for (const seed of [123456789n, 42n]) {
-  const { jumps, shots } = botLog(seed);
-  console.log(JSON.stringify({ name: "bot", seed: seed.toString(), score: replay(seed, jumps, shots), jumps, shots }));
+// "segs" are the segment-relative logs exactly as they go on-chain (one submit_run call per segment).
+function finalTick(seed: bigint, jumps: number[], shots: number[]): number {
+  const s = new Sim(seed);
+  let ji = 0, si = 0;
+  while (!s.over) {
+    const j = ji < jumps.length && jumps[ji] === s.tick; if (j) ji++;
+    const f = si < shots.length && shots[si] === s.tick; if (f) si++;
+    s.step(j, f);
+  }
+  return s.tick;
 }
-// jump-only bot: clears crates but gets hit by sentries/drones
+function emit(name: string, seed: bigint, jumps: number[], shots: number[]) {
+  const ft = finalTick(seed, jumps, shots);
+  console.log(JSON.stringify({ name, seed: seed.toString(), score: replay(seed, jumps, shots), finalTick: ft, segs: splitSegments(jumps, shots, ft) }));
+}
+for (const seed of [123456789n, 42n]) {
+  const { jumps, shots } = botLog(seed, 3600); // plays well for 2 segments, then goes idle and is recaptured
+  emit("bot", seed, jumps, shots);
+}
 {
-  const seed = 42n;
+  const seed = 42n; // jump-only bot: clears crates but gets hit by sentries/drones
   const s = new Sim(seed);
   const jumps: number[] = [];
   while (!s.over) {
@@ -15,7 +29,6 @@ for (const seed of [123456789n, 42n]) {
     if (j) jumps.push(s.tick);
     s.step(j, false);
   }
-  console.log(JSON.stringify({ name: "jump-only", seed: "42", score: replay(seed, jumps, []), jumps, shots: [] }));
+  emit("jump-only", seed, jumps, []);
 }
-// idle: no input at all
-console.log(JSON.stringify({ name: "idle", seed: "42", score: replay(42n, [], []), jumps: [], shots: [] }));
+emit("idle", 42n, [], []);

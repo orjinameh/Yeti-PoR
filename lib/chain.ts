@@ -7,8 +7,14 @@ const EntryBcs = bcs.struct("Entry", { player: bcs.Address, score: bcs.u64() });
 const LeaderboardBcs = bcs.struct("Leaderboard", { id: bcs.Address, entries: bcs.vector(EntryBcs) });
 const RegistryBcs = bcs.struct("Registry", { id: bcs.Address, days: TableBcs, season: TableBcs, profiles: TableBcs, minted: TableBcs });
 const DayBoardBcs = bcs.struct("DayBoard", { entries: bcs.vector(EntryBcs), finalized: bcs.bool() });
-const ProfileBcs = bcs.struct("Profile", { points: bcs.u64(), last_day: bcs.u64(), streak: bcs.u64() });
-const RunBcs = bcs.struct("Run", { id: bcs.Address, seed: bcs.u64(), day: bcs.u64() });
+const ProfileBcs = bcs.struct("Profile", { points: bcs.u64(), last_day: bcs.u64(), streak: bcs.u64(), welcomed: bcs.bool() });
+const SimStateBcs = bcs.struct("SimState", {
+  rng: bcs.u64(), start: bcs.u64(), kind: bcs.u64(), ehp: bcs.u64(), tick: bcs.u64(), air: bcs.u64(),
+  passed: bcs.u64(), kills: bcs.u64(), hp: bcs.u64(), inv: bcs.u64(), cd: bcs.u64(), dead: bcs.bool(),
+});
+const RunBcs = bcs.struct("Run", { id: bcs.Address, seed: bcs.u64(), day: bcs.u64(), st: SimStateBcs });
+const CosmeticBcs = bcs.struct("Cosmetic", { id: bcs.Address, kind: bcs.u8(), name: bcs.string(), rarity: bcs.string(), season: bcs.u64(), serial: bcs.u64() });
+const ReceiptBcs = bcs.struct("Receipt", { id: bcs.Address, seed: bcs.u64(), score: bcs.u64(), day: bcs.u64() });
 
 export type Row = { player: string; score: string };
 
@@ -83,4 +89,28 @@ export async function readSeason(client: any, seasonId: string): Promise<Row[]> 
     }),
   );
   return out.sort((a, b) => Number(b.score) - Number(a.score)).slice(0, 10).map((e) => ({ player: String(e.player), score: String(e.score) }));
+}
+
+/** Human-readable list of the objects a transaction minted (receipt, cosmetics, trophy), so the UI can say what the player earned. */
+export async function describeCreated(client: any, created: string[]): Promise<string[]> {
+  const out: string[] = [];
+  for (const id of created) {
+    try {
+      const c = await content(client, id);
+      if (c.type.endsWith("::Cosmetic")) {
+        const x = CosmeticBcs.parse(c.bytes);
+        out.push(`${x.name} (${x.rarity}) edition #${x.serial}`);
+      } else if (c.type.endsWith("::Receipt")) {
+        const x = ReceiptBcs.parse(c.bytes);
+        out.push(`Run receipt, score ${x.score}`);
+      } else if (c.type.endsWith("::Trophy")) out.push("Daily champion trophy");
+    } catch { /* not readable, skip */ }
+  }
+  return out;
+}
+
+/** Tick the on-chain Run has been verified up to (0 for a fresh run). Used to resume a half-submitted long run. */
+export async function readRunTick(client: any, runId: string): Promise<number> {
+  const c = await content(client, runId);
+  return Number(RunBcs.parse(c.bytes).st.tick);
 }

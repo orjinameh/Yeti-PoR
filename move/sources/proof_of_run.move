@@ -2,11 +2,17 @@
 /// The physics below MUST stay identical to lib/engine.ts (integer-only, no signed math).
 module proof_of_run::proof_of_run;
 
+use std::string::String;
 use sui::clock::Clock;
+use sui::display;
+use sui::package;
 use sui::random::{Self, Random};
 use sui::table::{Self, Table};
 
-const TICKS: u64 = 1800;
+/// Runs are endless up to MAX_TICKS (3 hours at base speed). One transaction verifies one segment of
+/// SEG_TICKS ticks; log ticks are segment-relative. The sim state lives in the Run object between segments.
+const MAX_TICKS: u64 = 108000;
+const SEG_TICKS: u64 = 1800;
 const STAGE_TICKS: u64 = 450;
 const MAX_ENTRIES: u64 = 10;
 const HP_MAX: u64 = 5;
@@ -36,7 +42,23 @@ const CAP_CROWN: u64 = 100;
 const PROFILE: vector<u64> = vector[9, 16, 22, 27, 30, 31, 31, 30, 27, 22, 16, 9];
 
 /// day = 0 for free runs, otherwise the UTC day number of the daily challenge.
-public struct Run has key { id: UID, seed: u64, day: u64 }
+public struct Run has key { id: UID, seed: u64, day: u64, st: SimState }
+
+/// Simulation state carried between segments. Mirrors Sim in lib/engine.ts.
+public struct SimState has store, copy, drop {
+    rng: u64,
+    start: u64,
+    kind: u64,
+    ehp: u64,
+    tick: u64,
+    air: u64,
+    passed: u64,
+    kills: u64,
+    hp: u64,
+    inv: u64,
+    cd: u64,
+    dead: bool,
+}
 
 public struct Receipt has key, store { id: UID, seed: u64, score: u64, day: u64 }
 
@@ -48,7 +70,7 @@ public struct Leaderboard has key { id: UID, entries: vector<Entry> }
 public struct DayBoard has store { entries: vector<Entry>, finalized: bool }
 
 /// Reward points are earned once per UTC day per player (first verified daily run), which stops farming.
-public struct Profile has store { points: u64, last_day: u64, streak: u64 }
+public struct Profile has store { points: u64, last_day: u64, streak: u64, welcomed: bool }
 
 public struct Registry has key {
     id: UID,
@@ -61,12 +83,64 @@ public struct Registry has key {
 /// Held by the publisher. Needed to grant limited cosmetics (season prizes, events, tournaments).
 public struct AdminCap has key, store { id: UID }
 
-public struct Cosmetic has key, store { id: UID, kind: u8, season: u64, serial: u64 }
+public struct Cosmetic has key, store { id: UID, kind: u8, name: String, rarity: String, season: u64, serial: u64 }
+
+/// One-time witness (module name in capitals) used to claim the Publisher for Display.
+public struct PROOF_OF_RUN has drop {}
+
+/// Image host for wallet display. SVGs live in public/nft of the repo; change it later with display::update_version
+/// on the Display objects held by the publisher if you host them elsewhere.
+const IMAGE_BASE: vector<u8> = b"https://cdn.jsdelivr.net/gh/orjinameh/Yeti-PoR@main/public/nft/";
+
 
 /// Minted to the verified winner of a finished daily challenge.
 public struct Trophy has key, store { id: UID, day: u64, seed: u64, score: u64 }
 
-fun init(ctx: &mut TxContext) {
+fun init(otw: PROOF_OF_RUN, ctx: &mut TxContext) {
+    let publisher = package::claim(otw, ctx);
+    let base: String = IMAGE_BASE.to_string();
+
+    let mut d = display::new_with_fields<Cosmetic>(
+        &publisher,
+        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string(), b"project_url".to_string()],
+        vector[
+            b"{name}".to_string(),
+            b"Yeti Proof-of-Run {rarity} cosmetic, edition #{serial}. Earned by playing verified runs.".to_string(),
+            { let mut u = copy base; u.append(b"cosmetic-{kind}.svg".to_string()); u },
+            b"https://github.com/orjinameh/Yeti-PoR".to_string(),
+        ],
+        ctx,
+    );
+    d.update_version();
+    transfer::public_transfer(d, ctx.sender());
+
+    let mut t = display::new_with_fields<Trophy>(
+        &publisher,
+        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
+        vector[
+            b"Daily Champion Trophy - day {day}".to_string(),
+            b"Won the verified Yeti daily challenge for day {day} with a score of {score}.".to_string(),
+            { let mut u = copy base; u.append(b"trophy.svg".to_string()); u },
+        ],
+        ctx,
+    );
+    t.update_version();
+    transfer::public_transfer(t, ctx.sender());
+
+    let mut r = display::new_with_fields<Receipt>(
+        &publisher,
+        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
+        vector[
+            b"Yeti Run Receipt".to_string(),
+            b"Proof that this run was replayed and verified on-chain. Score {score}.".to_string(),
+            { let mut u = copy base; u.append(b"receipt.svg".to_string()); u },
+        ],
+        ctx,
+    );
+    r.update_version();
+    transfer::public_transfer(r, ctx.sender());
+    transfer::public_transfer(publisher, ctx.sender());
+
     transfer::share_object(Leaderboard { id: object::new(ctx), entries: vector[] });
     transfer::share_object(Registry {
         id: object::new(ctx),
@@ -125,16 +199,21 @@ fun add_points(reg: &mut Registry, player: address, pts: u64) {
     };
 }
 
-fun award_daily(reg: &mut Registry, player: address, day: u64, alive: bool) {
+fun ensure_profile(reg: &mut Registry, player: address) {
     if (!reg.profiles.contains(player)) {
-        reg.profiles.add(player, Profile { points: 0, last_day: 0, streak: 0 });
+        reg.profiles.add(player, Profile { points: 0, last_day: 0, streak: 0, welcomed: false });
     };
+}
+
+/// `long` = the run survived at least one full segment (SEG_TICKS ticks).
+fun award_daily(reg: &mut Registry, player: address, day: u64, long: bool) {
+    ensure_profile(reg, player);
     let p = reg.profiles.borrow_mut(player);
     if (p.last_day == day) return; // already rewarded today
     p.streak = if (p.last_day + 1 == day) p.streak + 1 else 1;
     p.last_day = day;
     let mut pts = 1u64;
-    if (alive) pts = pts + 2;
+    if (long) pts = pts + 2;
     if (p.streak % 5 == 0) pts = pts + 5;
     p.points = p.points + pts;
 }
@@ -147,7 +226,11 @@ fun mint_cosmetic(reg: &mut Registry, kind: u8, season: u64, to: address, ctx: &
     assert!(cap == 0 || *m < cap, E_SOLD_OUT);
     *m = *m + 1;
     let serial = *m;
-    transfer::public_transfer(Cosmetic { id: object::new(ctx), kind, season, serial }, to);
+    let (name, rarity) = if (kind == 0) (b"Ice Shard".to_string(), b"Common".to_string())
+        else if (kind == 1) (b"Frozen Helm".to_string(), b"Rare".to_string())
+        else if (kind == 2) (b"Glacier Armor".to_string(), b"Epic".to_string())
+        else (b"Eternal Crown".to_string(), b"Legendary".to_string());
+    transfer::public_transfer(Cosmetic { id: object::new(ctx), kind, name, rarity, season, serial }, to);
 }
 
 /// Spend reward points on a cosmetic (kinds 0-2). Limited kinds have a hard supply cap.
@@ -222,58 +305,76 @@ fun kind_for(r: u64, start: u64): u64 {
     }
 }
 
-fun hp_for(kind: u64): u64 {
-    if (kind == 1) 2 else if (kind == 2) 1 else 0
+fun hp_for(kind: u64, start: u64): u64 {
+    if (kind == 1) { if (start >= STAGE_TICKS * 6) 3 else 2 } else if (kind == 2) 1 else 0
+}
+
+fun new_state(seed: u64): SimState {
+    let rng = next(seed % 2147483648);
+    let start = 20 + draw(rng);
+    let kind = kind_for(roll(rng), start);
+    SimState {
+        rng, start, kind, ehp: hp_for(kind, start),
+        tick: 0, air: 0, passed: 0, kills: 0, hp: HP_MAX, inv: 0, cd: 0, dead: false,
+    }
+}
 }
 
 fun check_log(log: &vector<u16>) {
     let n = log.length();
-    assert!(n <= TICKS, E_BAD_LOG);
+    assert!(n <= SEG_TICKS, E_BAD_LOG);
     let mut i = 0;
     let mut prev = 0u64;
     while (i < n) {
         let j = (log[i] as u64);
-        assert!(j < TICKS, E_BAD_LOG);
+        assert!(j < SEG_TICKS, E_BAD_LOG);
         if (i > 0) assert!(j > prev, E_BAD_LOG);
         prev = j;
         i = i + 1;
     };
 }
 
-/// Deterministic replay of a jump log + shot log. Aborts E_BAD_LOG on a malformed log.
-public fun replay(seed: u64, jumps: &vector<u16>, shots: &vector<u16>): u64 {
-    let (score, _) = simulate(seed, jumps, shots);
+public fun state_over(st: &SimState): bool { st.dead || st.tick >= MAX_TICKS }
+
+/// Final score of a finished run. The health bonus only applies if the yeti survived the whole 3 hours.
+public fun state_score(run: &SimState): u64 {
+    let mut score = run.passed * 100 + run.tick + run.kills * 50;
+    if (!run.dead && run.tick >= MAX_TICKS) score = score + run.hp * 50;
     score
 }
 
-/// Returns (score, survived).
-fun simulate(seed: u64, jumps: &vector<u16>, shots: &vector<u16>): (u64, bool) {
+/// Advances the run by one segment (up to SEG_TICKS ticks), consuming the segment-relative logs.
+/// Aborts E_BAD_LOG on a malformed log. Must match Sim in lib/engine.ts.
+fun advance(run: &mut SimState, jumps: &vector<u16>, shots: &vector<u16>) {
     check_log(jumps);
     check_log(shots);
     let nj = jumps.length();
     let ns = shots.length();
 
-    let mut rng = next(seed % 2147483648);
-    let mut start = 20 + draw(rng);
-    let mut kind = kind_for(roll(rng), start);
-    let mut ehp = hp_for(kind);
-    let mut tick = 0u64;
-    let mut air = 0u64;
+    let base = run.tick;
+    let end = if (base + SEG_TICKS > MAX_TICKS) MAX_TICKS else base + SEG_TICKS;
+    let mut rng = run.rng;
+    let mut start = run.start;
+    let mut kind = run.kind;
+    let mut ehp = run.ehp;
+    let mut tick = run.tick;
+    let mut air = run.air;
     let mut ji = 0u64;
     let mut si = 0u64;
-    let mut passed = 0u64;
-    let mut kills = 0u64;
-    let mut hp = HP_MAX;
-    let mut inv = 0u64;
-    let mut cd = 0u64;
-    let mut dead = false;
+    let mut passed = run.passed;
+    let mut kills = run.kills;
+    let mut hp = run.hp;
+    let mut inv = run.inv;
+    let mut cd = run.cd;
+    let mut dead = run.dead;
 
-    while (tick < TICKS && !dead) {
-        if (ji < nj && (jumps[ji] as u64) == tick) {
+    while (tick < end && !dead) {
+        let rel = tick - base;
+        if (ji < nj && (jumps[ji] as u64) == rel) {
             ji = ji + 1;
             if (air == 0) air = 1;
         };
-        let want_shot = if (si < ns && (shots[si] as u64) == tick) {
+        let want_shot = if (si < ns && (shots[si] as u64) == rel) {
             si = si + 1;
             true
         } else {
@@ -311,7 +412,7 @@ fun simulate(seed: u64, jumps: &vector<u16>, shots: &vector<u16>): (u64, bool) {
                 rng = next(rng);
                 start = start + 16 + draw(rng);
                 kind = kind_for(roll(rng), start);
-                ehp = hp_for(kind);
+                ehp = hp_for(kind, start);
             };
             if (air > 0) {
                 air = air + 1;
@@ -320,26 +421,43 @@ fun simulate(seed: u64, jumps: &vector<u16>, shots: &vector<u16>): (u64, bool) {
             tick = tick + 1;
         };
     };
-    let mut score = passed * 100 + tick + kills * 50;
-    if (!dead) score = score + hp * 50;
-    (score, !dead)
+    run.rng = rng;
+    run.start = start;
+    run.kind = kind;
+    run.ehp = ehp;
+    run.tick = tick;
+    run.air = air;
+    run.passed = passed;
+    run.kills = kills;
+    run.hp = hp;
+    run.inv = inv;
+    run.cd = cd;
+    run.dead = dead;
+}
+
+/// Single-segment replay (score of the state after the first segment). Used by tests.
+public fun replay(seed: u64, jumps: &vector<u16>, shots: &vector<u16>): u64 {
+    let mut st = new_state(seed);
+    advance(&mut st, jumps, shots);
+    state_score(&st)
 }
 
 /// Free run: seed comes from sui::random. Must stay a non-public `entry` fun.
 entry fun start_run(r: &Random, ctx: &mut TxContext) {
     let mut g = random::new_generator(r, ctx);
     let seed = (random::generate_u32(&mut g) as u64);
-    transfer::transfer(Run { id: object::new(ctx), seed, day: 0 }, ctx.sender());
+    transfer::transfer(Run { id: object::new(ctx), seed, day: 0, st: new_state(seed) }, ctx.sender());
 }
 
 /// Daily challenge: everyone who calls this on the same UTC day gets the same seed.
 entry fun start_daily_run(clock: &Clock, ctx: &mut TxContext) {
     let day = clock.timestamp_ms() / 86400000;
-    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day }, ctx.sender());
+    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day, st: new_state(daily_seed(day)) }, ctx.sender());
 }
 
-/// Replays both logs, requires the claimed score to match, records it, mints a receipt.
-/// A forged log or score aborts with E_SCORE_MISMATCH and the Run is not consumed.
+/// Verifies one segment of the run. If the run is not over yet the Run is returned to the player for the
+/// next segment. When the run ends (death or 3-hour cap) the claimed score must match, it is recorded and a
+/// receipt is minted. A forged log or score aborts with E_SCORE_MISMATCH and the Run is not consumed.
 entry fun submit_run(
     board: &mut Leaderboard,
     reg: &mut Registry,
@@ -349,9 +467,15 @@ entry fun submit_run(
     claimed_score: u64,
     ctx: &mut TxContext,
 ) {
-    let Run { id, seed, day } = run;
+    let Run { id, seed, day, mut st } = run;
+    advance(&mut st, &jumps, &shots);
+    if (!state_over(&st)) {
+        // Run continues: keep it (same object id) so the next segment can be submitted. claimed_score is ignored.
+        transfer::transfer(Run { id, seed, day, st }, ctx.sender());
+        return
+    };
     id.delete();
-    let (score, alive) = simulate(seed, &jumps, &shots);
+    let score = state_score(&st);
     assert!(score == claimed_score, E_SCORE_MISMATCH);
 
     board.entries.push_back(Entry { player: ctx.sender(), score });
@@ -364,18 +488,39 @@ entry fun submit_run(
 
     if (day > 0) {
         record_day(reg, day, ctx.sender(), score);
-        award_daily(reg, ctx.sender(), day, alive);
+        award_daily(reg, ctx.sender(), day, st.tick >= SEG_TICKS);
+    };
+
+    // First verified run ever: a free common Ice Shard so every new player sees something in their wallet.
+    ensure_profile(reg, ctx.sender());
+    if (!reg.profiles.borrow(ctx.sender()).welcomed) {
+        reg.profiles.borrow_mut(ctx.sender()).welcomed = true;
+        mint_cosmetic(reg, 0, 0, ctx.sender(), ctx);
     };
 
     transfer::public_transfer(Receipt { id: object::new(ctx), seed, score, day }, ctx.sender());
 }
 
+/// Runs every segment in order and returns the final score (aborts if the run is not over at the end).
 #[test_only]
-public fun init_for_testing(ctx: &mut TxContext) { init(ctx) }
+public fun run_segments(seed: u64, js: &vector<vector<u16>>, ss: &vector<vector<u16>>): u64 {
+    let mut st = new_state(seed);
+    let mut i = 0;
+    while (i < js.length()) {
+        assert!(!state_over(&st), E_BAD_LOG);
+        advance(&mut st, &js[i], &ss[i]);
+        i = i + 1;
+    };
+    assert!(state_over(&st), E_BAD_LOG);
+    state_score(&st)
+}
+
+#[test_only]
+public fun init_for_testing(ctx: &mut TxContext) { init(PROOF_OF_RUN {}, ctx) }
 
 #[test_only]
 public fun daily_run_for_testing(day: u64, ctx: &mut TxContext) {
-    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day }, ctx.sender());
+    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day, st: new_state(daily_seed(day)) }, ctx.sender());
 }
 
 #[test_only]

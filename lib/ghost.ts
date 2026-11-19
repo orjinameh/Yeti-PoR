@@ -1,4 +1,4 @@
-import { replay, TICKS } from "./engine.ts";
+import { replay, MAX_TICKS } from "./engine.ts";
 
 export type Ghost = { seed: string; score: number; jumps: number[]; shots: number[] };
 
@@ -12,7 +12,7 @@ export function encodeGhost(seed: bigint, jumps: number[], shots: number[]): str
 const nums = (s: string): number[] | null => {
   if (s === "") return [];
   const a = s.split(",").map(Number);
-  return a.length <= TICKS && a.every((n) => Number.isInteger(n)) ? a : null;
+  return a.length <= MAX_TICKS && a.every((n) => Number.isInteger(n)) ? a : null;
 };
 
 /** Parses and RE-COMPUTES the score by replaying the engine, so a code can't lie about its score. */

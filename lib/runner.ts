@@ -1,6 +1,6 @@
 // Framework-free game runner: owns the canvas, the fixed-step sim loop, rendering and the input API.
 // The React console (components/Console.tsx) only calls start / jump / fire / pause / resume / destroy.
-import { Sim, TPS, TICKS, HP_MAX, stageOf } from "./engine.ts";
+import { Sim, TPS, STAGE_TICKS, HP_MAX, stageOf, levelOf, tpsFor } from "./engine.ts";
 import { audio } from "./audio.ts";
 import { Sprites } from "./sprites.ts";
 import {
@@ -11,7 +11,7 @@ import {
 } from "./art.ts";
 
 export type Ghost = { jumps: number[]; shots: number[] };
-export type Done = { jumps: number[]; shots: number[]; score: number; kills: number; hp: number; escaped: boolean; stage: number };
+export type Done = { jumps: number[]; shots: number[]; score: number; kills: number; hp: number; escaped: boolean; stage: number; ticks: number };
 export type RunnerOpts = { seed: bigint; ghost?: Ghost | null; tutorial?: boolean; onDone: (d: Done) => void };
 type Phase = "attract" | "count" | "play" | "end";
 
@@ -100,7 +100,7 @@ export class Runner {
   // ---------- loop ----------
   private frame = (now: number): void => {
     const dt = this.paused ? 0 : Math.min(0.05, (now - this.last) / 1000);
-    const stepMs = 1000 / TPS;
+    const stepMs = 1000 / tpsFor(this.sim.tick);
     if (!this.paused && this.phase === "play") this.acc = Math.min(this.acc + (now - this.last), stepMs * 3);
     this.last = now;
     this.clock += dt;
@@ -120,8 +120,9 @@ export class Runner {
 
   private simulate(now: number, stepMs: number): void {
     const sim = this.sim;
-    while (this.acc >= stepMs && !sim.over) {
-      this.acc -= stepMs;
+    let stepMs2 = 1000 / tpsFor(sim.tick);
+    while (this.acc >= stepMs2 && !sim.over) {
+      this.acc -= stepMs2;
       const j = this.jumpPending;
       this.jumpPending = false;
       const want = this.fireHeld || this.firePending;
@@ -163,7 +164,8 @@ export class Runner {
       }
       if (wasAir && sim.air === 0 && !sim.dead) { audio.land(); dust(this.sparks, PLAYER_X, GROUND, 4); }
       if (sim.passed > passed0) this.pop = Math.max(this.pop, 0.6);
-      const st = stageOf(sim.tick);
+      const st = levelOf(sim.tick);
+      stepMs2 = 1000 / tpsFor(sim.tick);
       if (st !== this.curStage && !sim.over) { this.curStage = st; this.capT = 0; this.cardT = 0; this.transFlash = 1; audio.stage(); }
 
       if (this.gsim && this.ghost && !this.gsim.over) {
@@ -185,7 +187,7 @@ export class Runner {
   }
 
   private update(dt: number): void {
-    stepSnow(this.snow, dt, this.phase === "play" ? PX * TPS : 22);
+    stepSnow(this.snow, dt, this.phase === "play" ? PX * tpsFor(this.sim.tick) : 22);
     stepSparks(this.sparks, dt);
     for (const b of this.bolts) b.t += dt * 7;
     for (let i = this.bolts.length - 1; i >= 0; i--) if (this.bolts[i].t > 1.05) this.bolts.splice(i, 1);
@@ -204,7 +206,7 @@ export class Runner {
       if (!this.finished && this.endT > 1.3) {
         this.finished = true;
         const s = this.sim;
-        this.onDone({ jumps: this.jumps, shots: this.shots, score: s.score, kills: s.kills, hp: s.hp, escaped: s.escaped, stage: stageOf(s.tick) });
+        this.onDone({ jumps: this.jumps, shots: this.shots, score: s.score, kills: s.kills, hp: s.hp, escaped: s.escaped, stage: levelOf(s.tick), ticks: s.tick });
       }
     }
   }
@@ -212,7 +214,7 @@ export class Runner {
   // ---------- drawing ----------
   private draw(now: number): void {
     const ctx = this.ctx, sim = this.sim, clock = this.clock;
-    const stepMs = 1000 / TPS;
+    const stepMs = 1000 / tpsFor(sim.tick);
     const attract = this.phase === "attract";
     const alpha = this.phase === "play" ? Math.min(1, this.acc / stepMs) : 0;
     const tickF = sim.tick + alpha;
@@ -290,7 +292,7 @@ export class Runner {
     px(ctx, `${String(Math.floor(sim.tick * 1.5)).padStart(4, "0")} M`, 772, 42, 13, "#ffffff", "right");
     // stage progress
     rr(ctx, 524, 62, 262, 7, 3.5); ctx.fillStyle = "rgba(10,14,28,0.75)"; ctx.fill();
-    const pw = Math.max(7, 262 * (sim.tick / TICKS));
+    const pw = Math.max(7, 262 * ((sim.tick % STAGE_TICKS) / STAGE_TICKS));
     rr(ctx, 524, 62, pw, 7, 3.5);
     const pg = ctx.createLinearGradient(524, 0, 786, 0); pg.addColorStop(0, "#7fd4ff"); pg.addColorStop(1, "#ffd29a");
     ctx.fillStyle = pg; ctx.fill();
@@ -298,8 +300,8 @@ export class Runner {
     for (const q of [0.25, 0.5, 0.75]) ctx.fillRect(524 + 262 * q - 1, 62, 2, 7);
     // stage tag
     metal(ctx, 14, H - 40, 206, 26, 8);
-    px(ctx, `STAGE ${stage + 1}`, 26, H - 22, 10, "#ffb27a");
-    px(ctx, STAGES[stage].name, 100, H - 22, 10, "#dbe8ff");
+    px(ctx, `LEVEL ${levelOf(sim.tick) + 1}`, 26, H - 22, 10, "#ffb27a");
+    px(ctx, STAGES[stage].name, 104, H - 22, 10, "#dbe8ff");
     // story caption
     if (this.phase === "play" && this.capT < 4.4) {
       const line = STAGES[stage].line;
@@ -319,7 +321,7 @@ export class Runner {
     if (this.cardT < 1.9) {
       const a = Math.min(1, this.cardT / 0.25) * Math.min(1, (1.9 - this.cardT) / 0.4);
       ctx.globalAlpha = a;
-      px(ctx, `STAGE ${stage + 1}`, W / 2, 150, 13, "#ffb27a", "center");
+      px(ctx, `LEVEL ${levelOf(this.sim.tick) + 1}`, W / 2, 150, 13, "#ffb27a", "center");
       px(ctx, STAGES[stage].name, W / 2, 188, 28, "#ffffff", "center");
       ctx.globalAlpha = 1;
     }

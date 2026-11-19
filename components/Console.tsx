@@ -2,7 +2,7 @@
 import { PointerEvent as RPointerEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useCurrentAccount, useCurrentClient, useDAppKit, useWallets } from "@mysten/dapp-kit-react";
 import { Transaction } from "@mysten/sui/transactions";
-import { findNewRun, readDayBoard, readLeaderboard, readProfilePoints, readRegistryTables, readSeason, waitTx } from "@/lib/chain";
+import { findNewRun, readDayBoard, readLeaderboard, readProfilePoints, readRegistryTables, readSeason, waitTx, describeCreated, readRunTick } from "@/lib/chain";
 import Game, { Done, Ghost } from "./Game";
 import { Icon, Mark } from "./icons";
 import type { Runner } from "@/lib/runner.ts";
@@ -12,6 +12,7 @@ import { audio } from "@/lib/audio.ts";
 import { dailySeed, utcDay, msUntilNextDay, fmtCountdown } from "@/lib/daily.ts";
 import { encodeGhost, parseGhost, loadBest, saveBest } from "@/lib/ghost.ts";
 import { STAGES } from "@/lib/art.ts";
+import { splitSegments, SEG_TICKS } from "@/lib/engine.ts";
 
 type Screen = "boot" | "story" | "title" | "loading" | "run" | "pause" | "result" | "board" | "ghost";
 type Mode = "daily" | "free";
@@ -86,6 +87,8 @@ export default function Console() {
   const [myPoints, setMyPoints] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>("all");
   const [busy, setBusy] = useState(false);
+  const [subMsg, setSubMsg] = useState("");
+  const [earned, setEarned] = useState<string[]>([]);
   const [sfxOn, setSfxOn] = useState(true);
   const [musicOn, setMusicOn] = useState(true);
   const [now, setNow] = useState<number | null>(null);
@@ -203,6 +206,7 @@ export default function Console() {
     audio.click();
     setResult(null);
     setSubmitted(false);
+    setEarned([]);
     setLoadPct(0);
     setTip(Math.floor(Math.random() * TIPS.length));
     setScreen("loading");
@@ -268,16 +272,30 @@ export default function Console() {
     setBusy(true);
     try {
       const claimed = forge ? result.score + 1000 : result.score;
-      const tx = new Transaction();
-      tx.moveCall({
-        target: `${PACKAGE_ID}::${MODULE}::submit_run`,
-        arguments: [tx.object(LEADERBOARD_ID), tx.object(REGISTRY_ID), tx.object(s.runId), tx.pure.vector("u16", result.jumps), tx.pure.vector("u16", result.shots), tx.pure.u64(claimed)],
-      });
-      const { digest } = await signAndExec({ transaction: tx });
-      const r = await waitTx(client, digest);
-      const ok = r.ok;
-      push({ ok, msg: ok ? `Verified on-chain. Score ${claimed}.` : `Rejected on-chain: ${r.error}`, digest });
-      if (ok) { setSubmitted(true); setSession({ ...s, runId: null }); audio.win(); loadBoard(); }
+      // Long runs are verified one 1,800-tick segment per transaction; the last segment carries the score.
+      const segs = splitSegments(result.jumps, result.shots, result.ticks);
+      let earned: string[] = [];
+      // resume after an interrupted or rejected submit: skip segments the chain has already verified
+      const from = Math.min(segs.length - 1, Math.floor((await readRunTick(client, s.runId)) / SEG_TICKS));
+      for (let i = from; i < segs.length; i++) {
+        const last = i === segs.length - 1;
+        setSubMsg(segs.length > 1 ? `Part ${i + 1} of ${segs.length}: confirm in your wallet` : "");
+        const tx = new Transaction();
+        tx.moveCall({
+          target: `${PACKAGE_ID}::${MODULE}::submit_run`,
+          arguments: [tx.object(LEADERBOARD_ID), tx.object(REGISTRY_ID), tx.object(s.runId), tx.pure.vector("u16", segs[i].jumps), tx.pure.vector("u16", segs[i].shots), tx.pure.u64(last ? claimed : 0)],
+        });
+        const { digest } = await signAndExec({ transaction: tx });
+        const r = await waitTx(client, digest);
+        if (!r.ok) { push({ ok: false, msg: `Rejected on-chain (part ${i + 1}/${segs.length}): ${r.error}`, digest }); setSubMsg(""); setBusy(false); return; }
+        if (last) {
+          earned = await describeCreated(client, r.created);
+          push({ ok: true, msg: `Verified on-chain. Score ${claimed}.${earned.length ? " You received: " + earned.join("; ") + "." : ""}`, digest });
+        }
+      }
+      setEarned(earned);
+      setSubMsg("");
+      setSubmitted(true); setSession({ ...s, runId: null }); audio.win(); loadBoard();
     } catch (e: any) {
       // wallets usually dry-run first, so a forged tx is refused with the Move abort before signing
       push({ ok: false, msg: `Rejected${forge ? " (forged score)" : ""}: ${e?.message ?? e}` });
@@ -459,7 +477,7 @@ export default function Console() {
 
   const best = session ? loadBest(session.seed) : null;
   const running = screen === "run" || screen === "pause";
-  const stageName = (n: number) => ["THE CELL BLOCK", "THE LAB CORRIDOR", "THE CARGO BAY", "THE BREAKOUT"][n];
+  const stageName = (n: number) => ["THE CELL BLOCK", "THE LAB CORRIDOR", "THE CARGO BAY", "THE BREAKOUT"][n % 4];
 
   return (
     <div className="shell">
@@ -595,7 +613,7 @@ export default function Console() {
             <div className="ov dim">
               <div className="panel">
                 <div className="p-head">
-                  <h2>{result.escaped ? "SUBJECT Y-7 ESCAPED" : `RECAPTURED IN ${stageName(result.stage)}`}</h2>
+                  <h2>{result.escaped ? "SUBJECT Y-7 ESCAPED" : `RECAPTURED ON LEVEL ${result.stage + 1}`}</h2>
                   <span>{session.label}</span>
                 </div>
                 <div className="p-body">
@@ -611,10 +629,16 @@ export default function Console() {
                   <div className="stats">
                     <div><span>TAKEDOWNS</span><b>{result.kills}</b></div>
                     <div><span>HEALTH LEFT</span><b>{result.hp} / 5</b></div>
-                    <div><span>STAGE</span><b>{result.stage + 1} / 4</b></div>
-                    <div><span>INPUTS</span><b>{result.jumps.length} / {result.shots.length}</b></div>
+                    <div><span>LEVEL</span><b>{result.stage + 1}</b></div>
+                    <div><span>DISTANCE</span><b>{Math.floor(result.ticks * 1.5)} M</b></div>
                   </div>
                 </div>
+                {earned.length > 0 && (
+                  <div className="status ok"><b>EARNED</b> {earned.join("  |  ")}. Find them in your wallet under collectibles.</div>
+                )}
+                {session.verified && session.runId && !submitted && (
+                  <p className="note note-in">Verified runs mint a receipt. Your first verified run also gives a free Ice Shard, and daily runs earn reward points toward rarer cosmetics.{result.ticks > SEG_TICKS ? ` Long run: it is verified in ${Math.ceil(result.ticks / SEG_TICKS)} parts, one signature each.` : ""}</p>
+                )}
                 {log[0] && (
                   <div className={`status ${log[0].ok ? "ok" : "bad"}`}>
                     {log[0].msg} {log[0].digest && <a href={explorer(log[0].digest)} target="_blank" rel="noreferrer">VIEW TX</a>}
@@ -623,7 +647,7 @@ export default function Console() {
                 <div className="p-foot">
                   <button className="mbtn primary" onClick={() => launch(false)}><b>RUN AGAIN</b></button>
                   {session.verified && session.runId && (
-                    <button className="mbtn warm" disabled={busy} onClick={() => submit(false)}><b>{busy ? "VERIFYING..." : "SUBMIT ON-CHAIN"}</b></button>
+                    <button className="mbtn warm" disabled={busy} onClick={() => submit(false)}><b>{busy ? "VERIFYING..." : "SUBMIT ON-CHAIN"}</b>{busy && subMsg && <small>{subMsg}</small>}</button>
                   )}
                   <button className="mbtn" onClick={copyBest}><b>COPY GHOST</b></button>
                   <button className="mbtn" onClick={() => open("board")}><b>LEADERBOARD</b></button>

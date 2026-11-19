@@ -319,7 +319,7 @@ export function drawBackground(ctx: Ctx, stage: number, scroll: number, t: numbe
 }
 
 // ---------- obstacles and enemies (x = left edge, width OB_W) ----------
-export function drawCrate(ctx: Ctx, x: number): void {
+function crate0(ctx: Ctx, x: number): void {
   const b = (bx: number, by: number, w: number, h: number) => {
     rr(ctx, bx, by, w, h, 7);
     ctx.fillStyle = vgrad(ctx, by, by + h, [[0, "#b7c9e6"], [1, "#6f86ad"]]); ctx.fill();
@@ -333,7 +333,7 @@ export function drawCrate(ctx: Ctx, x: number): void {
   glow(ctx, x + OB_W / 2, G - 11, 30, "rgba(90,220,255,A)", 0.4);
 }
 
-export function drawSentry(ctx: Ctx, x: number, t: number, hp: number, flash: number): void {
+function sentry0(ctx: Ctx, x: number, t: number, hp: number, flash: number): void {
   const cx = x + OB_W / 2;
   ctx.fillStyle = "rgba(10,20,45,0.3)";
   ctx.beginPath(); ctx.ellipse(cx, G + 2, 30, 5, 0, 0, TAU); ctx.fill();
@@ -353,6 +353,21 @@ export function drawSentry(ctx: Ctx, x: number, t: number, hp: number, flash: nu
     ctx.beginPath(); ctx.arc(cx + 8 + Math.sin(t * 6) * 2, G - 46 - ((t * 20) % 10), 4, 0, TAU); ctx.fill();
   }
   if (flash > 0) { rr(ctx, x - 2, G - 41, OB_W + 4, 41, 11); ctx.fillStyle = `rgba(255,255,255,${flash * 0.8})`; ctx.fill(); }
+}
+
+// Ground obstacles are drawn large (like the big floor enemies in EMB). Scaling is visual only; hit boxes are unchanged.
+export const CRATE_SCALE = 1.55;
+export const SENTRY_SCALE = 1.85;
+function scaled(ctx: Ctx, x: number, k: number, draw: () => void): void {
+  const cx = x + OB_W / 2;
+  ctx.save();
+  ctx.translate(cx, G); ctx.scale(k, k); ctx.translate(-cx, -G);
+  draw();
+  ctx.restore();
+}
+export function drawCrate(ctx: Ctx, x: number): void { scaled(ctx, x, CRATE_SCALE, () => crate0(ctx, x)); }
+export function drawSentry(ctx: Ctx, x: number, t: number, hp: number, flash: number): void {
+  scaled(ctx, x, SENTRY_SCALE, () => sentry0(ctx, x, t, hp, flash));
 }
 
 export function drawDrone(ctx: Ctx, x: number, t: number, flash: number, danger: boolean): void {
@@ -381,7 +396,7 @@ export function drawDrone(ctx: Ctx, x: number, t: number, flash: number, danger:
 }
 
 export const enemyCenter = (kind: number, x: number): [number, number] =>
-  kind === 2 ? [x + OB_W / 2, DRONE_Y] : [x + OB_W / 2, G - 24];
+  kind === 2 ? [x + OB_W / 2, DRONE_Y] : [x + OB_W / 2, G - 24 * SENTRY_SCALE];
 
 // ---------- the yeti: Subject Y-7 (original design) ----------
 export type YetiPose = {

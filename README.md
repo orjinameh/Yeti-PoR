@@ -16,7 +16,7 @@ Honest limit: this proves a score is consistent with a legal input log, not that
 4. `npm install && npm run dev`, connect a testnet wallet, Start verified run, play, Submit, then Forge it.
 
 ## Day-1 risks to check (from the brief)
-- Replay gas for 1800 ticks (3 min runs): if too high, lower TICKS or chunk verification across transactions.
+- Replay gas per segment (1,800 ticks): if a segment fails on gas, lower SEG_TICKS in lib/engine.ts AND move/sources/proof_of_run.move, then `npm run vectors` and paste into the Move tests.
 - `sui::random` rules: `start_run` is a non-public `entry` taking `&Random` (0x8); keep it that way.
 - Forge it: wallets dry-run first, so the abort may show before signing. For the on-chain explorer proof, set a manual gas budget or execute via CLI: `sui client call --package <PKG> --module proof_of_run --function submit_run --args <BOARD> <RUN> "[1,2]" 9999 --gas-budget 50000000`.
 
@@ -52,3 +52,10 @@ Ghosts from other players (needs winning input logs stored on-chain or in an ind
 - The app registers the **Slush web wallet** through `WalletProvider slushWallet` (needs `@mysten/dapp-kit` >= 0.16; the repo is on 0.19.11). On a phone browser, tap CONNECT WALLET and pick Slush: it signs in with Google, Apple or a passkey, no extension or app install.
 - Wallet app users (Slush, Suiet etc.) can also open the site in the wallet's built-in browser; it injects the wallet automatically.
 - Slush's web wallet opens a popup, so allow popups for your site if the phone browser blocks it. Use a testnet account and faucet SUI.
+
+## v4: endless runs, collectibles you can see
+- **Endless**: a run lasts until you are recaptured, capped at 108,000 ticks (3 hours at base speed). Every 450 ticks is a level; the game also speeds up each level (10 to 18 ticks per second, presentation only), so long runs get hard.
+- **Segmented verification**: `submit_run` verifies one 1,800-tick segment per call (log ticks are segment-relative). The sim state lives in the `Run` object; non-final calls return the Run to the player, the final call carries the score. The app does this automatically and resumes a half-submitted run.
+- **Wallet visibility**: `Cosmetic`, `Trophy` and `Receipt` now have Sui Display (name, description, image). Images are `public/nft/*.svg`, served via jsDelivr from `orjinameh/Yeti-PoR@main`; push the repo to `main` so they resolve. Wallet support for SVG varies.
+- **First verified run** mints a free Ice Shard; daily runs earn reward points (1, +2 if the run lasts a full segment, +5 on a 5-day streak).
+- Publish fresh (new `Run` layout, new init with Display): update all three IDs.
