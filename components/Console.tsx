@@ -109,6 +109,19 @@ export default function Console() {
 
   const push = (e: Entry) => setLog((l) => [e, ...l].slice(0, 6));
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2400); };
+  const [rpcMsg, setRpcMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // real reachability test from this browser to the configured Sui RPC (for devices with no console)
+  const checkRpc = async () => {
+    const where = process.env.NEXT_PUBLIC_SUI_RPC_URL || "default public testnet fullnode";
+    setRpcMsg({ ok: true, text: "Checking..." });
+    const t0 = performance.now();
+    try {
+      const cp = await client.getLatestCheckpointSequenceNumber();
+      setRpcMsg({ ok: true, text: `RPC reachable. Latest checkpoint ${cp}, ${Math.round(performance.now() - t0)} ms. (${where})` });
+    } catch (e: any) {
+      setRpcMsg({ ok: false, text: `RPC NOT reachable from this browser: ${e?.message ?? e}. (${where})` });
+    }
+  };
 
   // ---------- boot ----------
   useEffect(() => {
@@ -552,6 +565,8 @@ export default function Console() {
                 {log[0] && !log[0].ok && (
                   <div className="status bad" style={{ marginTop: 10, wordBreak: "break-word", userSelect: "text" }}>{log[0].msg}</div>
                 )}
+                <button className="mbtn slim" style={{ marginTop: 10 }} onClick={() => { audio.click(); checkRpc(); }}><b>NETWORK CHECK</b><small>Test the Sui RPC from this device</small></button>
+                {rpcMsg && <div className={`status ${rpcMsg.ok ? "ok" : "bad"}`} style={{ marginTop: 8, wordBreak: "break-word", userSelect: "text" }}>{rpcMsg.text}</div>}
               </div>
               <nav className="t-menu">
                 <button className="mbtn primary" onClick={() => launch(false)}><b>RUN</b><small>Practice. Free, no wallet.</small></button>
