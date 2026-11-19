@@ -13,7 +13,9 @@ const SimStateBcs = bcs.struct("SimState", {
   passed: bcs.u64(), kills: bcs.u64(), hp: bcs.u64(), inv: bcs.u64(), cd: bcs.u64(), dead: bcs.bool(), meat: bcs.u64(),
 });
 const RunHeadBcs = bcs.struct("RunHead", { id: bcs.Address, seed: bcs.u64(), day: bcs.u64() });
-const RunBcs = bcs.struct("Run", { id: bcs.Address, seed: bcs.u64(), day: bcs.u64(), st: SimStateBcs });
+const RunBcs = bcs.struct("Run", { id: bcs.Address, seed: bcs.u64(), day: bcs.u64(), st: SimStateBcs, jumps: bcs.vector(bcs.u32()), shots: bcs.vector(bcs.u32()) });
+const GhostKeyBcs = bcs.struct("GhostKey", { day: bcs.u64(), player: bcs.Address });
+const GhostRecBcs = bcs.struct("GhostRec", { seed: bcs.u64(), score: bcs.u64(), jumps: bcs.vector(bcs.u32()), shots: bcs.vector(bcs.u32()) });
 const CosmeticBcs = bcs.struct("Cosmetic", { id: bcs.Address, kind: bcs.u8(), name: bcs.string(), rarity: bcs.string(), season: bcs.u64(), serial: bcs.u64() });
 const ReceiptBcs = bcs.struct("Receipt", { id: bcs.Address, seed: bcs.u64(), score: bcs.u64(), day: bcs.u64() });
 
@@ -114,13 +116,23 @@ export async function describeCreated(client: any, created: string[]): Promise<s
   return out;
 }
 
+/** A player's best ghost stored on-chain (day 0 = best ever). Returns null if none. The caller re-computes the score by replaying. */
+export async function readGhost(client: any, registryId: string, packageId: string, day: number, player: string): Promise<{ seed: string; score: number; jumps: number[]; shots: number[] } | null> {
+  try {
+    const name = { type: `${packageId}::proof_of_run::GhostKey`, bcs: GhostKeyBcs.serialize({ day, player }).toBytes() };
+    const { dynamicField } = await client.getDynamicField({ parentId: registryId, name });
+    const g = GhostRecBcs.parse(toBytes(dynamicField.value.bcs));
+    return { seed: String(g.seed), score: Number(g.score), jumps: g.jumps.map(Number), shots: g.shots.map(Number) };
+  } catch { return null; }
+}
+
 /** Tick the on-chain Run has been verified up to (0 for a fresh run). Used to resume a half-submitted long run. */
 export async function readRunTick(client: any, runId: string): Promise<number> {
   try {
     const c = await content(client, runId);
     // A Run from an older contract has no simulation state (only id, seed, day = 48 bytes). Parsing it with the
     // current layout reads past the end of the buffer ("Out of bounds access" in Safari), so treat it as a fresh run.
-    if (c.bytes.length < 48 + 97) return 0;
+    if (c.bytes.length < 48 + 97 + 2) return 0;
     return Number(RunBcs.parse(c.bytes).st.tick);
   } catch {
     return 0; // could not read the state: start from the first segment, the contract rejects it clearly if that is wrong

@@ -2,7 +2,7 @@
 import { PointerEvent as RPointerEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useCurrentAccount, useCurrentClient, useDAppKit, useWallets } from "@mysten/dapp-kit-react";
 import { Transaction } from "@mysten/sui/transactions";
-import { findNewRun, readDayBoard, readLeaderboard, readProfilePoints, readRegistryTables, readSeason, waitTx, describeCreated, readRunTick, readMyItems, type OwnedItem } from "@/lib/chain";
+import { findNewRun, readDayBoard, readLeaderboard, readProfilePoints, readRegistryTables, readSeason, waitTx, describeCreated, readRunTick, readMyItems, readGhost, type OwnedItem } from "@/lib/chain";
 import Game, { Done, Ghost } from "./Game";
 import { Icon, Mark } from "./icons";
 import type { Runner } from "@/lib/runner.ts";
@@ -490,6 +490,26 @@ export default function Console() {
     setScreen("title");
   };
 
+  // ---------- challenge a leaderboard player's ghost ----------
+  const challenge = async (player: string) => {
+    if (!REGISTRY_ID || !PACKAGE_ID) return flash("Contract not configured yet");
+    audio.click();
+    setBusy(true);
+    try {
+      const day = tab === "today" ? utcDay(Date.now()) : 0;
+      const raw = await readGhost(client, REGISTRY_ID, PACKAGE_ID, day, player);
+      if (!raw) return flash("No ghost stored for this player. Only runs submitted on the current contract have one.");
+      const g = parseGhost(encodeGhost(BigInt(raw.seed), raw.jumps, raw.shots)); // re-computes the score by replaying
+      if (!g) return flash("That ghost could not be replayed");
+      saveBest(g.seed, g.score, g.jumps, g.shots);
+      newSession(BigInt(g.seed), `CHALLENGE ${short(player)} - TARGET ${g.score}`);
+      flash(`Ghost loaded. Beat ${g.score.toLocaleString()}.`);
+      setScreen("title");
+    } catch (e: any) {
+      flash(`Could not load the ghost: ${e?.message ?? e}`);
+    } finally { setBusy(false); }
+  };
+
   // ---------- sound keys ----------
   const toggleSfx = () => { const v = !sfxOn; audio.unlock(); audio.setSfxMuted(!v); setSfxOn(v); if (v) audio.click(); };
   const toggleMusic = () => {
@@ -740,11 +760,12 @@ export default function Console() {
                   const missing = tab === "all" ? !LEADERBOARD_ID : !REGISTRY_ID;
                   return (
                     <div className="table">
-                      <div className="tr th"><span>RANK</span><span>PLAYER</span><span>{unit}</span></div>
+                      <div className={`tr th ${tab !== "season" && REGISTRY_ID ? "ch" : ""}`}><span>RANK</span><span>PLAYER</span><span>{unit}</span>{tab !== "season" && REGISTRY_ID && <span />}</div>
                       {rows.length === 0 && <div className="tr empty"><span>{missing ? "Contract not configured yet." : tab === "season" ? "No points yet. Finalize a finished day to award them." : "No verified runs yet. Be the first."}</span></div>}
                       {rows.map((b, i) => (
-                        <div key={i} className={`tr ${acct && String(b.player) === acct.address ? "me" : ""}`}>
+                        <div key={i} className={`tr ${tab !== "season" && REGISTRY_ID ? "ch" : ""} ${acct && String(b.player) === acct.address ? "me" : ""}`}>
                           <span>{String(i + 1).padStart(2, "0")}</span><span>{short(String(b.player))}</span><span>{Number(b.score).toLocaleString()}</span>
+                          {tab !== "season" && REGISTRY_ID && <button className="chal" disabled={busy} onClick={() => challenge(String(b.player))}>CHALLENGE</button>}
                         </div>
                       ))}
                     </div>
@@ -761,6 +782,7 @@ export default function Console() {
                     <p className="note note-in">Eternal Crown (legendary, 100 max) is only granted to season winners and event champions.</p>
                   </div>
                 )}
+                {tab !== "season" && <p className="note note-in">Tap CHALLENGE to race a player's best verified ghost on its seed. Only runs submitted on the current contract have a ghost.</p>}
                 {tab === "today" && <p className="note note-in">Daily boards keep each player's best verified score. Winners of finished days earn season points (5 / 3 / 1) and a Trophy.</p>}
                 <div className="p-foot">
                   <button className="mbtn" onClick={() => { audio.click(); setScreen(back); }}><b>BACK</b></button>

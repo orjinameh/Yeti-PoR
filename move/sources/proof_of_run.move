@@ -4,6 +4,7 @@ module proof_of_run::proof_of_run;
 
 use std::string::String;
 use sui::clock::Clock;
+use sui::dynamic_field as df;
 use sui::display_registry::{Self, DisplayRegistry, Display as DisplayV2, DisplayCap};
 use sui::package;
 use sui::random::{Self, Random};
@@ -15,6 +16,8 @@ const MAX_TICKS: u64 = 108000;
 const SEG_TICKS: u64 = 1800;
 const STAGE_TICKS: u64 = 450;
 const MAX_ENTRIES: u64 = 10;
+/// Runs whose input log is longer than this (jumps + shots) are not stored as ghosts.
+const MAX_GHOST_LOG: u64 = 8000;
 const HP_MAX: u64 = 5;
 const INV_TICKS: u64 = 6;
 const SHOT_CD: u64 = 3;
@@ -42,7 +45,12 @@ const CAP_CROWN: u64 = 100;
 const PROFILE: vector<u64> = vector[9, 16, 22, 27, 30, 31, 31, 30, 27, 22, 16, 9];
 
 /// day = 0 for free runs, otherwise the UTC day number of the daily challenge.
-public struct Run has key { id: UID, seed: u64, day: u64, st: SimState }
+/// jumps/shots are the ABSOLUTE ticks of every input so far (capped), kept so the finished run can be raced as a ghost.
+public struct Run has key { id: UID, seed: u64, day: u64, st: SimState, jumps: vector<u32>, shots: vector<u32> }
+
+/// Best ghost per (day, player), stored as dynamic fields on the Registry. day 0 = the player's best ever run.
+public struct GhostKey has copy, drop, store { day: u64, player: address }
+public struct GhostRec has store, drop { seed: u64, score: u64, jumps: vector<u32>, shots: vector<u32> }
 
 /// Simulation state carried between segments. Mirrors Sim in lib/engine.ts.
 public struct SimState has store, copy, drop {
@@ -520,13 +528,13 @@ public fun replay(seed: u64, jumps: &vector<u16>, shots: &vector<u16>): u64 {
 entry fun start_run(r: &Random, ctx: &mut TxContext) {
     let mut g = random::new_generator(r, ctx);
     let seed = (random::generate_u32(&mut g) as u64);
-    transfer::transfer(Run { id: object::new(ctx), seed, day: 0, st: new_state(seed) }, ctx.sender());
+    transfer::transfer(Run { id: object::new(ctx), seed, day: 0, st: new_state(seed), jumps: vector[], shots: vector[] }, ctx.sender());
 }
 
 /// Daily challenge: everyone who calls this on the same UTC day gets the same seed.
 entry fun start_daily_run(clock: &Clock, ctx: &mut TxContext) {
     let day = clock.timestamp_ms() / 86400000;
-    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day, st: new_state(daily_seed(day)) }, ctx.sender());
+    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day, st: new_state(daily_seed(day)), jumps: vector[], shots: vector[] }, ctx.sender());
 }
 
 /// Verifies one segment of the run. If the run is not over yet the Run is returned to the player for the
@@ -541,11 +549,23 @@ entry fun submit_run(
     claimed_score: u64,
     ctx: &mut TxContext,
 ) {
-    let Run { id, seed, day, mut st } = run;
+    let Run { id, seed, day, mut st, jumps: mut all_jumps, shots: mut all_shots } = run;
+    let base = st.tick;
     advance(&mut st, &jumps, &shots);
+    // remember the inputs as absolute ticks (stop once the cap is hit; such a run just won't be stored as a ghost)
+    let mut gi = 0;
+    while (gi < jumps.length() && all_jumps.length() + all_shots.length() < MAX_GHOST_LOG) {
+        all_jumps.push_back((base + (jumps[gi] as u64)) as u32);
+        gi = gi + 1;
+    };
+    gi = 0;
+    while (gi < shots.length() && all_jumps.length() + all_shots.length() < MAX_GHOST_LOG) {
+        all_shots.push_back((base + (shots[gi] as u64)) as u32);
+        gi = gi + 1;
+    };
     if (!state_over(&st)) {
         // Run continues: keep it (same object id) so the next segment can be submitted. claimed_score is ignored.
-        transfer::transfer(Run { id, seed, day, st }, ctx.sender());
+        transfer::transfer(Run { id, seed, day, st, jumps: all_jumps, shots: all_shots }, ctx.sender());
         return
     };
     id.delete();
@@ -560,7 +580,9 @@ entry fun submit_run(
     };
     if (board.entries.length() > MAX_ENTRIES) { board.entries.pop_back(); };
 
+    store_ghost(reg, 0, ctx.sender(), seed, score, &all_jumps, &all_shots);
     if (day > 0) {
+        store_ghost(reg, day, ctx.sender(), seed, score, &all_jumps, &all_shots);
         record_day(reg, day, ctx.sender(), score);
         award_daily(reg, ctx.sender(), day, st.tick >= SEG_TICKS);
     };
@@ -585,6 +607,17 @@ entry fun submit_run(
     transfer::transfer(Receipt { id: object::new(ctx), seed, score, day }, ctx.sender());
 }
 
+/// Keeps the player's best ghost for this day key (replaces it only if the new score is higher).
+fun store_ghost(reg: &mut Registry, day: u64, player: address, seed: u64, score: u64, jumps: &vector<u32>, shots: &vector<u32>) {
+    if (jumps.length() + shots.length() >= MAX_GHOST_LOG) return;
+    let key = GhostKey { day, player };
+    if (df::exists_(&reg.id, key)) {
+        if (df::borrow<GhostKey, GhostRec>(&reg.id, key).score >= score) return;
+        let _old: GhostRec = df::remove(&mut reg.id, key);
+    };
+    df::add(&mut reg.id, key, GhostRec { seed, score, jumps: *jumps, shots: *shots });
+}
+
 /// Runs every segment in order and returns the final score (aborts if the run is not over at the end).
 #[test_only]
 public fun run_segments(seed: u64, js: &vector<vector<u16>>, ss: &vector<vector<u16>>): u64 {
@@ -604,7 +637,7 @@ public fun init_for_testing(ctx: &mut TxContext) { init(PROOF_OF_RUN {}, ctx) }
 
 #[test_only]
 public fun daily_run_for_testing(day: u64, ctx: &mut TxContext) {
-    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day, st: new_state(daily_seed(day)) }, ctx.sender());
+    transfer::transfer(Run { id: object::new(ctx), seed: daily_seed(day), day, st: new_state(daily_seed(day)), jumps: vector[], shots: vector[] }, ctx.sender());
 }
 
 #[test_only]
