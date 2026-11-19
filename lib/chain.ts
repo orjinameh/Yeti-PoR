@@ -12,6 +12,7 @@ const SimStateBcs = bcs.struct("SimState", {
   rng: bcs.u64(), start: bcs.u64(), kind: bcs.u64(), ehp: bcs.u64(), tick: bcs.u64(), air: bcs.u64(),
   passed: bcs.u64(), kills: bcs.u64(), hp: bcs.u64(), inv: bcs.u64(), cd: bcs.u64(), dead: bcs.bool(),
 });
+const RunHeadBcs = bcs.struct("RunHead", { id: bcs.Address, seed: bcs.u64(), day: bcs.u64() });
 const RunBcs = bcs.struct("Run", { id: bcs.Address, seed: bcs.u64(), day: bcs.u64(), st: SimStateBcs });
 const CosmeticBcs = bcs.struct("Cosmetic", { id: bcs.Address, kind: bcs.u8(), name: bcs.string(), rarity: bcs.string(), season: bcs.u64(), serial: bcs.u64() });
 const ReceiptBcs = bcs.struct("Receipt", { id: bcs.Address, seed: bcs.u64(), score: bcs.u64(), day: bcs.u64() });
@@ -41,7 +42,7 @@ export async function findNewRun(client: any, owner: string, digest: string, cre
   for (const id of created) {
     try {
       const c = await content(client, id);
-      if (c.type.endsWith("::Run")) return { objectId: id, seed: BigInt(RunBcs.parse(c.bytes).seed) };
+      if (c.type.endsWith("::Run")) return { objectId: id, seed: BigInt(RunHeadBcs.parse(c.bytes.slice(0, 48)).seed) };
     } catch { /* try the next one */ }
   }
   // fallback: look through the account's Run objects for the one made by this transaction
@@ -49,7 +50,7 @@ export async function findNewRun(client: any, owner: string, digest: string, cre
   for (const o of (list?.objects ?? []) as any[]) {
     try {
       const c = await content(client, String(o.objectId));
-      if (c.previousTransaction === digest) return { objectId: String(o.objectId), seed: BigInt(RunBcs.parse(c.bytes).seed) };
+      if (c.previousTransaction === digest) return { objectId: String(o.objectId), seed: BigInt(RunHeadBcs.parse(c.bytes.slice(0, 48)).seed) };
     } catch { /* ignore */ }
   }
   return null;
