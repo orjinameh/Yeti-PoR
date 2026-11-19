@@ -4,7 +4,7 @@ module proof_of_run::proof_of_run;
 
 use std::string::String;
 use sui::clock::Clock;
-use sui::display;
+use sui::display_registry::{Self, DisplayRegistry, Display as DisplayV2, DisplayCap};
 use sui::package;
 use sui::random::{Self, Random};
 use sui::table::{Self, Table};
@@ -88,8 +88,8 @@ public struct Cosmetic has key, store { id: UID, kind: u8, name: String, rarity:
 /// One-time witness (module name in capitals) used to claim the Publisher for Display.
 public struct PROOF_OF_RUN has drop {}
 
-/// Image host for wallet display. SVGs live in public/nft of the repo; change it later with display::update_version
-/// on the Display objects held by the publisher if you host them elsewhere.
+/// Image host for wallet display. SVGs live in public/nft of the repo; change it later with display_registry::set
+/// using the DisplayCap objects that setup_displays sends to the deployer.
 const IMAGE_BASE: vector<u8> = b"https://cdn.jsdelivr.net/gh/orjinameh/Yeti-PoR@main/public/nft/";
 
 
@@ -97,48 +97,9 @@ const IMAGE_BASE: vector<u8> = b"https://cdn.jsdelivr.net/gh/orjinameh/Yeti-PoR@
 public struct Trophy has key, store { id: UID, day: u64, seed: u64, score: u64 }
 
 fun init(otw: PROOF_OF_RUN, ctx: &mut TxContext) {
+    // Display V1 can no longer be created (it aborts), so wallet art is set up once after publish
+    // by `setup_displays` (Display V2). init only claims the Publisher and creates the shared state.
     let publisher = package::claim(otw, ctx);
-    let base: String = IMAGE_BASE.to_string();
-
-    let mut d = display::new_with_fields<Cosmetic>(
-        &publisher,
-        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string(), b"project_url".to_string()],
-        vector[
-            b"{name}".to_string(),
-            b"Yeti Proof-of-Run {rarity} cosmetic, edition #{serial}. Earned by playing verified runs.".to_string(),
-            { let mut u = copy base; u.append(b"cosmetic-{kind}.svg".to_string()); u },
-            b"https://github.com/orjinameh/Yeti-PoR".to_string(),
-        ],
-        ctx,
-    );
-    d.update_version();
-    transfer::public_transfer(d, ctx.sender());
-
-    let mut t = display::new_with_fields<Trophy>(
-        &publisher,
-        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
-        vector[
-            b"Daily Champion Trophy - day {day}".to_string(),
-            b"Won the verified Yeti daily challenge for day {day} with a score of {score}.".to_string(),
-            { let mut u = copy base; u.append(b"trophy.svg".to_string()); u },
-        ],
-        ctx,
-    );
-    t.update_version();
-    transfer::public_transfer(t, ctx.sender());
-
-    let mut r = display::new_with_fields<Receipt>(
-        &publisher,
-        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
-        vector[
-            b"Yeti Run Receipt".to_string(),
-            b"Proof that this run was replayed and verified on-chain. Score {score}.".to_string(),
-            { let mut u = copy base; u.append(b"receipt.svg".to_string()); u },
-        ],
-        ctx,
-    );
-    r.update_version();
-    transfer::public_transfer(r, ctx.sender());
     transfer::public_transfer(publisher, ctx.sender());
 
     transfer::share_object(Leaderboard { id: object::new(ctx), entries: vector[] });
@@ -150,6 +111,67 @@ fun init(otw: PROOF_OF_RUN, ctx: &mut TxContext) {
         minted: table::new(ctx),
     });
     transfer::public_transfer(AdminCap { id: object::new(ctx) }, ctx.sender());
+}
+
+fun fill<T>(
+    d: &mut DisplayV2<T>,
+    cap: &DisplayCap<T>,
+    keys: vector<String>,
+    values: vector<String>,
+) {
+    let mut i = 0;
+    while (i < keys.length()) {
+        display_registry::set(d, cap, keys[i], values[i]);
+        i = i + 1;
+    };
+}
+
+/// One-time, after publish: creates the Display V2 objects (wallet name/art) for Cosmetic, Trophy and
+/// Receipt. Needs the Publisher (held by the deployer) and the system DisplayRegistry object 0xd.
+/// Each DisplayCap goes to the caller, so the art can be edited later. Aborts if already set up.
+entry fun setup_displays(
+    registry: &mut DisplayRegistry,
+    publisher: &mut package::Publisher,
+    ctx: &mut TxContext,
+) {
+    let base: String = IMAGE_BASE.to_string();
+
+    let (mut d, cap) = display_registry::new_with_publisher<Cosmetic>(registry, publisher, ctx);
+    fill(&mut d, &cap,
+        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string(), b"project_url".to_string()],
+        vector[
+            b"{name}".to_string(),
+            b"Yeti Proof-of-Run {rarity} cosmetic, edition #{serial}. Earned by playing verified runs.".to_string(),
+            { let mut u = copy base; u.append(b"cosmetic-{kind}.svg".to_string()); u },
+            b"https://github.com/orjinameh/Yeti-PoR".to_string(),
+        ],
+    );
+    display_registry::share(d);
+    transfer::public_transfer(cap, ctx.sender());
+
+    let (mut t, tcap) = display_registry::new_with_publisher<Trophy>(registry, publisher, ctx);
+    fill(&mut t, &tcap,
+        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
+        vector[
+            b"Daily Champion Trophy - day {day}".to_string(),
+            b"Won the verified Yeti daily challenge for day {day} with a score of {score}.".to_string(),
+            { let mut u = copy base; u.append(b"trophy.svg".to_string()); u },
+        ],
+    );
+    display_registry::share(t);
+    transfer::public_transfer(tcap, ctx.sender());
+
+    let (mut r, rcap) = display_registry::new_with_publisher<Receipt>(registry, publisher, ctx);
+    fill(&mut r, &rcap,
+        vector[b"name".to_string(), b"description".to_string(), b"image_url".to_string()],
+        vector[
+            b"Yeti Run Receipt".to_string(),
+            b"Proof that this run was replayed and verified on-chain. Score {score}.".to_string(),
+            { let mut u = copy base; u.append(b"receipt.svg".to_string()); u },
+        ],
+    );
+    display_registry::share(r);
+    transfer::public_transfer(rcap, ctx.sender());
 }
 
 fun sort_desc(v: &mut vector<Entry>) {
