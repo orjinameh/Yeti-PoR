@@ -1,11 +1,13 @@
 "use client";
 import { PointerEvent as RPointerEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { ConnectModal, useCurrentAccount, useDisconnectWallet, useSignAndExecuteTransaction, useSuiClient } from "@mysten/dapp-kit";
+import { useCurrentAccount, useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
+import { ConnectButton } from "@mysten/dapp-kit-react/ui";
 import { Transaction } from "@mysten/sui/transactions";
+import { findNewRun, readDayBoard, readLeaderboard, readProfilePoints, readRegistryTables, readSeason, waitTx } from "@/lib/chain";
 import Game, { Done, Ghost } from "./Game";
 import { Icon, Mark } from "./icons";
 import type { Runner } from "@/lib/runner.ts";
-import { PACKAGE_ID, LEADERBOARD_ID, REGISTRY_ID, RANDOM_ID, CLOCK_ID, MODULE } from "@/lib/config";
+import { PACKAGE_ID, LEADERBOARD_ID, REGISTRY_ID, RANDOM_ID, CLOCK_ID, MODULE, GRPC_URL } from "@/lib/config";
 import { replay } from "@/lib/engine.ts";
 import { audio } from "@/lib/audio.ts";
 import { dailySeed, utcDay, msUntilNextDay, fmtCountdown } from "@/lib/daily.ts";
@@ -55,16 +57,17 @@ function Key({ label, onClick, disabled, active, children }: { label: string; on
 
 export default function Console() {
   const acct = useCurrentAccount();
-  const client = useSuiClient();
-  // Re-sending an already signed transaction is idempotent (same digest), so a dropped request ("Load failed") is safe to retry.
-  const stepRef = useRef("wallet signing");
-  const { mutateAsync: signAndExec } = useSignAndExecuteTransaction({
-    execute: async ({ bytes, signature }) => {
-      stepRef.current = "sending to the Sui RPC after wallet approval";
-      return await retry(() => client.executeTransactionBlock({ transactionBlock: bytes, signature, options: { showRawEffects: true, showObjectChanges: true, showEffects: true } }));
-    },
-  });
-  const { mutate: disconnect } = useDisconnectWallet();
+  const client: any = useCurrentClient();
+  const dAppKit = useDAppKit();
+  // wallet signs and the transaction is executed; returns the digest, throws with the chain's error if it fails
+  const signAndExec = async ({ transaction }: { transaction: Transaction }): Promise<{ digest: string }> => {
+    const res: any = await dAppKit.signAndExecuteTransaction({ transaction });
+    if (res?.$kind === "FailedTransaction" || res?.FailedTransaction) throw new Error(res.FailedTransaction?.status?.error?.message ?? "Transaction failed");
+    const digest = res?.Transaction?.digest ?? res?.digest;
+    if (!digest) throw new Error("The wallet returned no transaction digest");
+    return { digest: String(digest) };
+  };
+  const disconnect = () => { try { dAppKit.disconnectWallet(); } catch { /* ignore */ } };
 
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => { try { setIsMobile(/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)); } catch {} }, []);
@@ -112,12 +115,12 @@ export default function Console() {
   const [rpcMsg, setRpcMsg] = useState<{ ok: boolean; text: string } | null>(null);
   // real reachability test from this browser to the configured Sui RPC (for devices with no console)
   const checkRpc = async () => {
-    const where = process.env.NEXT_PUBLIC_SUI_RPC_URL || "this site's /api/sui-rpc proxy to the testnet fullnode";
+    const where = GRPC_URL;
     setRpcMsg({ ok: true, text: "Checking..." });
     const t0 = performance.now();
     try {
-      const cp = await client.getLatestCheckpointSequenceNumber();
-      setRpcMsg({ ok: true, text: `RPC reachable. Latest checkpoint ${cp}, ${Math.round(performance.now() - t0)} ms. (${where})` });
+      await client.getObject({ objectId: CLOCK_ID }); // the shared Clock object always exists
+      setRpcMsg({ ok: true, text: `Sui gRPC reachable in ${Math.round(performance.now() - t0)} ms. (${where})` });
     } catch (e: any) {
       setRpcMsg({ ok: false, text: `RPC NOT reachable from this browser: ${e?.message ?? e}. (${where})` });
     }
@@ -215,26 +218,21 @@ export default function Console() {
         const tx = new Transaction();
         if (m === "daily") tx.moveCall({ target: `${PACKAGE_ID}::${MODULE}::start_daily_run`, arguments: [tx.object(CLOCK_ID)] });
         else tx.moveCall({ target: `${PACKAGE_ID}::${MODULE}::start_run`, arguments: [tx.object(RANDOM_ID)] });
-        step = "wallet signing";
-        stepRef.current = "wallet signing";
-        const { digest } = await signAndExec({ transaction: tx as any });
+        step = "wallet signing and sending";
+        const { digest } = await signAndExec({ transaction: tx });
         setLoadMsg("WAITING FOR THE CHAIN");
         step = "confirming transaction";
-        const r = await retry(() => client.waitForTransaction({ digest, timeout: 30000, pollInterval: 1000, options: { showObjectChanges: true, showEffects: true } }));
-        if (r.effects?.status.status !== "success") throw new Error(`Transaction failed on-chain: ${r.effects?.status.error ?? "unknown error"}`);
-        const created: any = r.objectChanges?.find((c: any) => c.type === "created" && c.objectType.endsWith(`::${MODULE}::Run`));
-        if (!created) throw new Error(`Run object not found in the transaction. Check NEXT_PUBLIC_PACKAGE_ID matches the published package.`);
+        const w = await retry(() => waitTx(client, digest));
+        if (!w.ok) throw new Error(`Transaction failed on-chain: ${w.error}`);
         // the fullnode can lag a moment behind the wallet's node, so retry the read
         step = "reading the new run";
-        let obj: any = null;
-        for (let i = 0; i < 6; i++) {
-          obj = await retry(() => client.getObject({ id: created.objectId, options: { showContent: true } }));
-          if (obj?.data?.content) break;
-          await new Promise((res) => setTimeout(res, 600));
-        }
-        if (!obj?.data?.content) throw new Error("Run object was created but could not be read yet. Try again.");
-        const seed = BigInt((obj.data.content as any).fields.seed);
-        newSession(seed, m === "daily" ? `VERIFIED DAILY - DAY ${d}` : "VERIFIED RUN", created.objectId, true);
+        if (!acct) throw new Error("Wallet disconnected");
+        const run = await retry(async () => {
+          const f = await findNewRun(client, acct.address, digest, w.created, `${PACKAGE_ID}::${MODULE}::Run`);
+          if (!f) throw new Error("Run object not found yet. Check NEXT_PUBLIC_PACKAGE_ID matches the published package.");
+          return f;
+        });
+        newSession(run.seed, m === "daily" ? `VERIFIED DAILY - DAY ${d}` : "VERIFIED RUN", run.objectId, true);
         push({ ok: true, msg: m === "daily" ? "Daily run started. Seed derived on-chain from the date." : "Run started. Seed from sui::random.", digest });
         setLoadMsg("SEED LOCKED");
         await fill(900, 0.12);
@@ -242,8 +240,7 @@ export default function Console() {
         const msg = String(e?.message ?? e);
         const rejected = /reject|denied|declin|cancel|closed/i.test(msg);
         const net = /load failed|failed to fetch|networkerror|429|timeout/i.test(msg);
-        const where = step === "wallet signing" ? stepRef.current : step;
-        push({ ok: false, msg: rejected ? "Wallet request was rejected or closed." : `Could not start a verified run (${where}): ${msg}${net ? ". Network problem. Check your wallet activity, then try again." : ""}` });
+        push({ ok: false, msg: rejected ? "Wallet request was rejected or closed." : `Could not start a verified run (${step}): ${msg}${net ? ". Network problem. Check your wallet activity, then try again." : ""}` });
         flash(rejected ? "Verified run cancelled" : "Verified run failed - see log");
         setScreen("title");
         return;
@@ -278,10 +275,10 @@ export default function Console() {
         target: `${PACKAGE_ID}::${MODULE}::submit_run`,
         arguments: [tx.object(LEADERBOARD_ID), tx.object(REGISTRY_ID), tx.object(s.runId), tx.pure.vector("u16", result.jumps), tx.pure.vector("u16", result.shots), tx.pure.u64(claimed)],
       });
-      const { digest } = await signAndExec({ transaction: tx as any });
-      const r = await client.waitForTransaction({ digest, options: { showEffects: true } });
-      const ok = r.effects?.status.status === "success";
-      push({ ok, msg: ok ? `Verified on-chain. Score ${claimed}.` : `Rejected on-chain: ${r.effects?.status.error}`, digest });
+      const { digest } = await signAndExec({ transaction: tx });
+      const r = await waitTx(client, digest);
+      const ok = r.ok;
+      push({ ok, msg: ok ? `Verified on-chain. Score ${claimed}.` : `Rejected on-chain: ${r.error}`, digest });
       if (ok) { setSubmitted(true); setSession({ ...s, runId: null }); audio.win(); loadBoard(); }
     } catch (e: any) {
       // wallets usually dry-run first, so a forged tx is refused with the Move abort before signing
@@ -293,37 +290,14 @@ export default function Console() {
   const loadBoard = useCallback(async () => {
     if (!LEADERBOARD_ID) return;
     try {
-      const o = await client.getObject({ id: LEADERBOARD_ID, options: { showContent: true } });
-      const f = (o.data?.content as any)?.fields?.entries ?? [];
-      setBoard(f.map((e: any) => e.fields ?? e));
+      setBoard(await readLeaderboard(client, LEADERBOARD_ID));
     } catch { /* ignore */ }
     if (!REGISTRY_ID) return;
     try {
-      const reg = await client.getObject({ id: REGISTRY_ID, options: { showContent: true } });
-      const rf = (reg.data?.content as any)?.fields;
-      const daysId = rf?.days?.fields?.id?.id;
-      const seasonId = rf?.season?.fields?.id?.id;
-      const profId = rf?.profiles?.fields?.id?.id;
-      if (profId && acct) {
-        try {
-          const pr = await client.getDynamicFieldObject({ parentId: profId, name: { type: "address", value: acct.address } });
-          setMyPoints(Number((pr.data?.content as any)?.fields?.value?.fields?.points ?? 0));
-        } catch { setMyPoints(0); }
-      } else setMyPoints(null);
-      if (daysId) {
-        try {
-          const d = await client.getDynamicFieldObject({ parentId: daysId, name: { type: "u64", value: String(utcDay(Date.now())) } });
-          const ents = (d.data?.content as any)?.fields?.value?.fields?.entries ?? [];
-          setDayRows(ents.map((e: any) => e.fields ?? e));
-        } catch { setDayRows([]); }
-      }
-      if (seasonId) {
-        const list = await client.getDynamicFields({ parentId: seasonId });
-        const objs = await client.multiGetObjects({ ids: list.data.map((x: any) => x.objectId), options: { showContent: true } });
-        const rows = objs.map((o: any) => ({ player: String(o.data?.content?.fields?.name), score: String(o.data?.content?.fields?.value) }));
-        rows.sort((x: Row, y: Row) => Number(y.score) - Number(x.score));
-        setSeasonRows(rows.slice(0, 10));
-      }
+      const t = await readRegistryTables(client, REGISTRY_ID);
+      setMyPoints(acct ? await readProfilePoints(client, t.profiles, acct.address) : null);
+      setDayRows(await readDayBoard(client, t.days, utcDay(Date.now())));
+      setSeasonRows(await readSeason(client, t.season));
     } catch { /* ignore */ }
   }, [client, acct]);
 
@@ -333,8 +307,9 @@ export default function Console() {
     try {
       const tx = new Transaction();
       tx.moveCall({ target: `${PACKAGE_ID}::${MODULE}::redeem`, arguments: [tx.object(REGISTRY_ID), tx.pure.u8(kind)] });
-      const { digest } = await signAndExec({ transaction: tx as any });
-      await client.waitForTransaction({ digest });
+      const { digest } = await signAndExec({ transaction: tx });
+      const w = await waitTx(client, digest);
+      if (!w.ok) throw new Error(w.error);
       push({ ok: true, msg: `${name} added to your wallet.`, digest });
       flash(`${name} unlocked`);
       loadBoard();
@@ -351,8 +326,9 @@ export default function Console() {
     try {
       const tx = new Transaction();
       tx.moveCall({ target: `${PACKAGE_ID}::${MODULE}::finalize_day`, arguments: [tx.object(REGISTRY_ID), tx.object(CLOCK_ID), tx.pure.u64(utcDay(Date.now()) - 1)] });
-      const { digest } = await signAndExec({ transaction: tx as any });
-      await client.waitForTransaction({ digest });
+      const { digest } = await signAndExec({ transaction: tx });
+      const w = await waitTx(client, digest);
+      if (!w.ok) throw new Error(w.error);
       push({ ok: true, msg: "Yesterday finalized. Points awarded and the winner received a Trophy.", digest });
       flash("Day finalized");
       loadBoard();
@@ -582,7 +558,7 @@ export default function Console() {
                   <button className="mbtn slim" onClick={() => { audio.click(); disconnect(); }}><b>{short(acct.address)}</b><small>TAP TO DISCONNECT</small></button>
                 ) : (
                   <>
-                    <ConnectModal trigger={<button className="mbtn slim" onClick={() => audio.click()}><b>CONNECT WALLET</b><small>For verified runs</small></button>} />
+                    <ConnectButton />
                     {isMobile && <p className="note note-in">On a phone: pick Slush (sign in with Google, Apple or a passkey), or open this page in your wallet app's built-in browser.</p>}
                   </>
                 )}

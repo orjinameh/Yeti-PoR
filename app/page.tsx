@@ -1,11 +1,8 @@
 "use client";
-import Providers from "./providers";
-import Console from "@/components/Console";
+import dynamic from "next/dynamic";
+
+const AppShell = dynamic(() => import("./app-shell"), { ssr: false });
 
 export default function Page() {
-  return (
-    <Providers>
-      <Console />
-    </Providers>
-  );
+  return <AppShell />;
 }
