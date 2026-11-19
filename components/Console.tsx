@@ -854,6 +854,12 @@ export default function Console() {
                             ["Peak Performer", "Score 10,000 in one run"],
                             ["Yeti Legend", "Escape Halcyon: survive the full 3 hours"],
                           ];
+                          const COSM: [string, string, string][] = [
+                            ["Ice Shard", "Common", "5 pts in the shop, or your first verified run"],
+                            ["Frozen Helm", "Rare", "25 pts in the shop, 5,000 max"],
+                            ["Glacier Armor", "Epic", "60 pts in the shop, 1,000 max"],
+                            ["Eternal Crown", "Legendary", "Season winners and event champions, 100 max"],
+                          ];
                           const got = new Map(items.filter((i) => i.kind === "achievement").map((i) => [i.ach, i] as const));
                           const proofs = items.filter((i) => i.kind === "receipt" || i.kind === "trophy");
                           const coll = items.filter((i) => i.kind === "cosmetic");
@@ -892,7 +898,21 @@ export default function Console() {
                               {proofs.length > 0 && <p className="tier">RUN PROOFS <i>SOULBOUND</i></p>}
                               {proofs.map(row)}
                               <p className="tier">TIER 2 - COLLECTIBLES <i>COSMETICS, TRADABLE</i></p>
-                              {coll.length === 0 && <div className="tr empty"><span>No cosmetics yet. Earn reward points on daily runs and redeem them in the leaderboard shop.</span></div>}
+                              <div className="badges">
+                                {COSM.map(([n, rarity, how], k) => {
+                                  const mine = coll.filter((c) => c.ckind === k);
+                                  return (
+                                    <div key={n} className={`badge ${mine.length ? "got" : ""}`}>
+                                      <b>{n}</b>
+                                      <span>{rarity} - {how}</span>
+                                      {mine.length
+                                        ? <a href={explorerObj(mine[0].id)} target="_blank" rel="noreferrer">OWNED{mine.length > 1 ? ` x${mine.length}` : ""} - EXPLORER</a>
+                                        : <em>LOCKED</em>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              {coll.length > 0 && <p className="tier">YOUR COLLECTIBLES <i>TRADABLE</i></p>}
                               {coll.map(row)}
                             </>
                           );

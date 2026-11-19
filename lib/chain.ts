@@ -133,6 +133,8 @@ const TrophyBcs = bcs.struct("Trophy", { id: bcs.Address, day: bcs.u64(), seed: 
 export type OwnedItem = {
   id: string; kind: "achievement" | "receipt" | "trophy" | "cosmetic"; title: string; detail: string;
   seed?: string; score?: number; digest?: string; ach?: number;
+  /** cosmetic kind (0 Ice Shard, 1 Frozen Helm, 2 Glacier Armor, 3 Eternal Crown), set for cosmetics only */
+  ckind?: number;
   /** soulbound items prove an achievement and cannot be traded; cosmetics are the tradable tier */
   soulbound: boolean;
 };
@@ -162,7 +164,7 @@ export async function readMyItems(client: any, owner: string, pkg: string): Prom
           return { id, kind, title: `Daily champion trophy - day ${x.day}`, detail: `Score ${Number(x.score).toLocaleString()}, seed ${x.seed}`, seed: String(x.seed), score: Number(x.score), digest, soulbound: true };
         }
         const x = CosmeticBcs.parse(c.bytes);
-        return { id, kind, title: String(x.name), detail: `${x.rarity}, edition #${x.serial}`, digest, soulbound: false };
+        return { id, kind, title: String(x.name), detail: `${x.rarity}, edition #${x.serial}`, digest, ckind: Number(x.kind), soulbound: false };
       } catch { return null; }
     }));
     out.push(...rows.filter((r): r is OwnedItem => r !== null));
