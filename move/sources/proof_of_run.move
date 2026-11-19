@@ -58,6 +58,7 @@ public struct SimState has store, copy, drop {
     inv: u64,
     cd: u64,
     dead: bool,
+    meat: u64,
 }
 
 /// SOULBOUND (key only, no store): the module can mint it to a player but nobody can transfer or sell it.
@@ -100,7 +101,8 @@ public struct Trophy has key { id: UID, day: u64, seed: u64, score: u64 }
 
 /// SOULBOUND achievement badge (key only). Tier 1 of the collectibles; cosmetics are tier 2 and tradable.
 /// kind: 0 First Ascent (first verified run), 1 Ice Survivor (reach level 3), 2 Peak Performer (score 10,000+),
-/// 3 Yeti Legend (escape Halcyon: survive the full 3 hours). Each is minted once per player.
+/// 3 Yeti Legend (escape Halcyon: survive the full 3 hours), 4 Scavenger / 5 Hunter / 6 Well Fed (collect 15 / 50 / 120 raw meat in one run).
+/// Each is minted once per player.
 public struct Achievement has key { id: UID, kind: u8, name: String, score: u64 }
 
 fun init(otw: PROOF_OF_RUN, ctx: &mut TxContext) {
@@ -284,7 +286,10 @@ fun grant_achievement(reg: &mut Registry, player: address, kind: u8, score: u64,
     let name = if (kind == 0) b"First Ascent".to_string()
         else if (kind == 1) b"Ice Survivor".to_string()
         else if (kind == 2) b"Peak Performer".to_string()
-        else b"Yeti Legend".to_string();
+        else if (kind == 3) b"Yeti Legend".to_string()
+        else if (kind == 4) b"Scavenger".to_string()
+        else if (kind == 5) b"Hunter".to_string()
+        else b"Well Fed".to_string();
     transfer::transfer(Achievement { id: object::new(ctx), kind, name, score }, player);
 }
 
@@ -345,23 +350,32 @@ fun draw(rng: u64): u64 { (rng / 65536) % 10 }
 
 fun roll(rng: u64): u64 { (rng / 256) % 100 }
 
-/// 0 crate, 1 sentry, 2 drone. Mix depends on the stage the obstacle starts in.
+/// Which lane the active item's meat floats in: 0 low, 1 middle, 2 high. Derived from the rng that made the item.
+fun lane(rng: u64): u64 { (rng / 1048576) % 3 }
+
+/// Is a yeti at height h in the given lane? Low = on the ground, middle = rising or falling, high = near the peak.
+fun in_lane(l: u64, h: u64): bool {
+    if (l == 0) h < 12 else if (l == 1) h >= 12 && h < 25 else h >= 25
+}
+
+/// 0 meat, 1 sentry, 2 drone. Mix depends on the stage the item starts in.
 fun kind_for(r: u64, start: u64): u64 {
     let s = start / STAGE_TICKS;
     let stage = if (s > 3) 3 else s;
     if (stage == 0) {
         if (r < 70) 0 else 1
     } else if (stage == 1) {
-        if (r < 35) 0 else if (r < 80) 1 else 2
+        if (r < 40) 0 else if (r < 75) 1 else 2
     } else if (stage == 2) {
-        if (r < 25) 0 else if (r < 55) 1 else 2
+        if (r < 35) 0 else if (r < 65) 1 else 2
     } else {
-        if (r < 20) 0 else if (r < 50) 1 else 2
+        if (r < 30) 0 else if (r < 60) 1 else 2
     }
 }
 
 fun hp_for(kind: u64, start: u64): u64 {
-    if (kind == 1) { if (start >= STAGE_TICKS * 6) 3 else 2 } else if (kind == 2) 1 else 0
+    // for meat, ehp 1 means "still there" and 0 means collected
+    if (kind == 1) { if (start >= STAGE_TICKS * 6) 3 else 2 } else 1
 }
 
 fun new_state(seed: u64): SimState {
@@ -370,7 +384,7 @@ fun new_state(seed: u64): SimState {
     let kind = kind_for(roll(rng), start);
     SimState {
         rng, start, kind, ehp: hp_for(kind, start),
-        tick: 0, air: 0, passed: 0, kills: 0, hp: HP_MAX, inv: 0, cd: 0, dead: false,
+        tick: 0, air: 0, passed: 0, kills: 0, hp: HP_MAX, inv: 0, cd: 0, dead: false, meat: 0,
     }
 }
 
@@ -392,7 +406,7 @@ public fun state_over(st: &SimState): bool { st.dead || st.tick >= MAX_TICKS }
 
 /// Final score of a finished run. The health bonus only applies if the yeti survived the whole 3 hours.
 public fun state_score(run: &SimState): u64 {
-    let mut score = run.passed * 100 + run.tick + run.kills * 50;
+    let mut score = run.passed * 100 + run.tick + run.kills * 50 + run.meat * 25;
     if (!run.dead && run.tick >= MAX_TICKS) score = score + run.hp * 50;
     score
 }
@@ -417,6 +431,7 @@ fun advance(run: &mut SimState, jumps: &vector<u16>, shots: &vector<u16>) {
     let mut si = 0u64;
     let mut passed = run.passed;
     let mut kills = run.kills;
+    let mut meat = run.meat;
     let mut hp = run.hp;
     let mut inv = run.inv;
     let mut cd = run.cd;
@@ -444,9 +459,13 @@ fun advance(run: &mut SimState, jumps: &vector<u16>, shots: &vector<u16>) {
         };
         let h = if (air == 0) 0 else *vector::borrow(&PROFILE, air - 1);
         if (inv > 0) inv = inv - 1;
+        if (kind == 0 && ehp > 0 && tick >= start && tick <= start + 2 && in_lane(lane(rng), h)) {
+            ehp = 0;
+            meat = meat + 1;
+        };
         if (tick >= start && tick <= start + 2 && inv == 0) {
             let danger = if (kind == 0) {
-                h < 3
+                false
             } else if (ehp == 0) {
                 false
             } else if (kind == 1) {
@@ -483,6 +502,7 @@ fun advance(run: &mut SimState, jumps: &vector<u16>, shots: &vector<u16>) {
     run.air = air;
     run.passed = passed;
     run.kills = kills;
+    run.meat = meat;
     run.hp = hp;
     run.inv = inv;
     run.cd = cd;
@@ -557,6 +577,10 @@ entry fun submit_run(
     if (st.tick >= 3 * STAGE_TICKS) grant_achievement(reg, ctx.sender(), 1, score, ctx);
     if (score >= 10000) grant_achievement(reg, ctx.sender(), 2, score, ctx);
     if (!st.dead && st.tick >= MAX_TICKS) grant_achievement(reg, ctx.sender(), 3, score, ctx);
+    // Food for the journey: raw meat collected in this run.
+    if (st.meat >= 15) grant_achievement(reg, ctx.sender(), 4, score, ctx);
+    if (st.meat >= 50) grant_achievement(reg, ctx.sender(), 5, score, ctx);
+    if (st.meat >= 120) grant_achievement(reg, ctx.sender(), 6, score, ctx);
 
     transfer::transfer(Receipt { id: object::new(ctx), seed, score, day }, ctx.sender());
 }

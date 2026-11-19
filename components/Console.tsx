@@ -37,7 +37,8 @@ async function retry<T>(fn: () => Promise<T>, tries = 6, ms = 700): Promise<T> {
 }
 const TIPS = [
   "Hold FIRE to auto-aim. Shots have a short cooldown.",
-  "Crates cannot be shot. Jump them.",
+  "Raw meat floats low, middle or high. Jump to the right height to grab it.",
+  "Sentries are too big to jump. Shoot them down.",
   "Drones only hurt you in the air. Stay low or shoot them.",
   "Clearing a stage with health left adds to your score.",
   "Your best run on a seed comes back as a ghost.",
@@ -607,7 +608,7 @@ export default function Console() {
               <div className="t-left">
                 <div className="eyebrow">SUBJECT Y-7</div>
                 <h1>ESCAPE FROM<br />HALCYON</h1>
-                <p className="logline">Jump the crates, shoot the sentries, duck the drones. Every score is replayed and verified on Sui.</p>
+                <p className="logline">Escape Halcyon. Gather raw meat for the journey, shoot the sentries, duck the drones. Every score is replayed and verified on Sui.</p>
                 <div className="chips">
                   {mode === "daily" && now !== null && <span className="chip">DAY <b>{day}</b></span>}
                   {mode === "daily" && now !== null && <span className="chip">RESETS IN <b>{fmtCountdown(msUntilNextDay(now))}</b></span>}
@@ -689,6 +690,7 @@ export default function Console() {
                   </div>
                   <div className="stats">
                     <div><span>TAKEDOWNS</span><b>{result.kills}</b></div>
+                    <div><span>MEAT</span><b>{result.meat}</b></div>
                     <div><span>HEALTH LEFT</span><b>{result.hp} / 5</b></div>
                     <div><span>LEVEL</span><b>{result.stage + 1}</b></div>
                     <div><span>DISTANCE</span><b>{Math.floor(result.ticks * 1.5)} M</b></div>
@@ -853,6 +855,9 @@ export default function Console() {
                             ["Ice Survivor", "Survive to level 3"],
                             ["Peak Performer", "Score 10,000 in one run"],
                             ["Yeti Legend", "Escape Halcyon: survive the full 3 hours"],
+                            ["Scavenger", "Collect 15 raw meat in one run"],
+                            ["Hunter", "Collect 50 raw meat in one run"],
+                            ["Well Fed", "Collect 120 raw meat in one run"],
                           ];
                           const COSM: [string, string, string][] = [
                             ["Ice Shard", "Common", "5 pts in the shop, or your first verified run"],

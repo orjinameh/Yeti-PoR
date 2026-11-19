@@ -205,6 +205,7 @@ class YetiAudio {
   click(): void { this.sweep("triangle", 700, 520, 0.05, 0.08); }
   blip(go: boolean): void { this.sweep("square", go ? 880 : 440, go ? 880 : 440, go ? 0.22 : 0.1, 0.1); }
   shoot(): void { this.sweep("sine", 1400, 500, 0.11, 0.13); this.sweep("triangle", 2100, 900, 0.07, 0.05); }
+  chomp(): void { this.sweep("triangle", 300, 520, 0.07, 0.14); this.sweep("triangle", 520, 780, 0.1, 0.12, 0.06); }
   hit(): void { this.sweep("square", 220, 140, 0.06, 0.06); }
   hurt(): void { this.sweep("sawtooth", 200, 70, 0.22, 0.18); if (this.ctx) this.noiseHit(this.ctx.currentTime, 0.12, 0.14, 600, this.sfxBus); }
   boom(): void {

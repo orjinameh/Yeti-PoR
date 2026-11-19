@@ -376,6 +376,31 @@ function scaled(ctx: Ctx, x: number, k: number, draw: () => void): void {
   draw();
   ctx.restore();
 }
+/** Raw meat floating at height `lift` px above the body line: a marbled steak with a bone, bobbing and glowing. */
+export function drawMeat(ctx: Ctx, x: number, lift: number, t: number): void {
+  const cx = x + OB_W / 2;
+  const cy = G - 45 - lift + Math.sin(t * 4 + x * 0.03) * 3;
+  glow(ctx, cx, cy, 46, "rgba(255,90,90,A)", 0.5);
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(-0.25);
+  // bone
+  ctx.fillStyle = "#f4ecd8";
+  rr(ctx, 6, -5, 30, 10, 5); ctx.fill();
+  ctx.beginPath(); ctx.arc(37, -6, 6, 0, TAU); ctx.arc(37, 6, 6, 0, TAU); ctx.fill();
+  // steak
+  ctx.beginPath();
+  ctx.moveTo(-26, -4); ctx.bezierCurveTo(-24, -24, 10, -26, 18, -10);
+  ctx.bezierCurveTo(26, 6, 10, 22, -8, 20); ctx.bezierCurveTo(-24, 18, -30, 8, -26, -4);
+  ctx.closePath();
+  ctx.fillStyle = vgrad(ctx, -24, 20, [[0, "#ff6f7d"], [1, "#b8283c"]]); ctx.fill();
+  ctx.strokeStyle = "rgba(255,230,230,0.6)"; ctx.lineWidth = 2; ctx.stroke();
+  // fat marbling
+  ctx.strokeStyle = "rgba(255,225,225,0.85)"; ctx.lineWidth = 3; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(-16, 2); ctx.quadraticCurveTo(-6, -10, 6, -2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-12, 12); ctx.quadraticCurveTo(0, 4, 10, 10); ctx.stroke();
+  ctx.restore();
+}
 export function drawCrate(ctx: Ctx, x: number): void { scaled(ctx, x, CRATE_SCALE, () => crate0(ctx, x)); }
 export function drawSentry(ctx: Ctx, x: number, t: number, hp: number, flash: number): void {
   scaled(ctx, x, SENTRY_SCALE, () => sentry0(ctx, x, t, hp, flash));

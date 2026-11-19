@@ -1,17 +1,17 @@
 // Framework-free game runner: owns the canvas, the fixed-step sim loop, rendering and the input API.
 // The React console (components/Console.tsx) only calls start / jump / fire / pause / resume / destroy.
-import { Sim, TPS, STAGE_TICKS, HP_MAX, stageOf, levelOf, tpsFor } from "./engine.ts";
+import { Sim, TPS, STAGE_TICKS, HP_MAX, stageOf, levelOf, tpsFor, LANE_H } from "./engine.ts";
 import { audio } from "./audio.ts";
 import { Sprites } from "./sprites.ts";
 import {
   W, H, GROUND, PX, PLAYER_X, HSCALE, HIT_R, STAGES, PIXEL,
-  drawBackground, drawCrate, drawSentry, drawDrone, drawYeti, drawSnow, stepSnow, newSnow,
+  drawBackground, drawMeat, drawSentry, drawDrone, drawYeti, drawSnow, stepSnow, newSnow,
   drawSparks, stepSparks, burst, dust, drawShot, enemyCenter, metal, rr, px, drawPortrait, segBar, drawCrosshair,
   Spark, Shot,
 } from "./art.ts";
 
 export type Ghost = { jumps: number[]; shots: number[] };
-export type Done = { jumps: number[]; shots: number[]; score: number; kills: number; hp: number; escaped: boolean; stage: number; ticks: number };
+export type Done = { jumps: number[]; shots: number[]; score: number; kills: number; meat: number; hp: number; escaped: boolean; stage: number; ticks: number };
 export type RunnerOpts = { seed: bigint; ghost?: Ghost | null; tutorial?: boolean; onDone: (d: Done) => void };
 type Phase = "attract" | "count" | "play" | "end";
 
@@ -155,6 +155,12 @@ export class Runner {
           this.pop = 1;
         }
       }
+      if (ev.collected) {
+        audio.chomp();
+        burst(this.sparks, PLAYER_X + 30, GROUND - this.curH * HSCALE - 60, 14, ["#ff6f7d", "#ffd0d0", "#ffffff"]);
+        this.floaters.push({ x: PLAYER_X + 40, y: GROUND - this.curH * HSCALE - 100, s: "+25", life: 1 });
+        this.pop = Math.max(this.pop, 0.8);
+      }
       if (ev.damaged) {
         audio.hurt();
         this.hurtT = 1;
@@ -206,7 +212,7 @@ export class Runner {
       if (!this.finished && this.endT > 1.3) {
         this.finished = true;
         const s = this.sim;
-        this.onDone({ jumps: this.jumps, shots: this.shots, score: s.score, kills: s.kills, hp: s.hp, escaped: s.escaped, stage: levelOf(s.tick), ticks: s.tick });
+        this.onDone({ jumps: this.jumps, shots: this.shots, score: s.score, kills: s.kills, meat: s.meat, hp: s.hp, escaped: s.escaped, stage: levelOf(s.tick), ticks: s.tick });
       }
     }
   }
@@ -229,7 +235,7 @@ export class Runner {
       sim.upcoming(4).forEach((u, idx) => {
         const x = PLAYER_X + HIT_R + (u.start - tickF) * PX;
         if (x < -80 || x > W + 20) return;
-        if (u.kind === 0) drawCrate(ctx, x);
+        if (u.kind === 0) { if (u.ehp > 0) drawMeat(ctx, x, LANE_H[u.lane] * HSCALE, clock); }
         else if (u.kind === 1 && u.ehp > 0) drawSentry(ctx, x, clock, u.ehp, idx === 0 ? this.eFlash : 0);
         else if (u.kind === 2 && u.ehp > 0) drawDrone(ctx, x, clock, idx === 0 ? this.eFlash : 0, sim.air > 0);
       });
@@ -284,6 +290,10 @@ export class Runner {
       metal(ctx, 336, 62, 128, 22, 8);
       px(ctx, `GHOST ${d >= 0 ? "+" : ""}${d}`, 400, 78, 9, d >= 0 ? "#7dffb2" : "#ff9a9a", "center");
     }
+    // meat collected
+    metal(ctx, 14, 82, 118, 30, 9);
+    px(ctx, "MEAT", 26, 102, 9, "#ff9aa6");
+    px(ctx, String(sim.meat).padStart(3, "0"), 120, 104, 13, "#ffffff", "right");
     // takedowns + distance
     metal(ctx, 524, 16, 262, 40, 10);
     drawCrosshair(ctx, 548, 36, 7, "#ffb27a");

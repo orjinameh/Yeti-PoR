@@ -21,7 +21,7 @@ for (const seed of [123456789n, 42n]) {
   emit("bot", seed, jumps, shots);
 }
 {
-  const seed = 42n; // jump-only bot: clears crates but gets hit by sentries/drones
+  const seed = 42n; // jump-only bot: jumps at every item but gets hit by sentries/drones
   const s = new Sim(seed);
   const jumps: number[] = [];
   while (!s.over) {
@@ -32,3 +32,8 @@ for (const seed of [123456789n, 42n]) {
   emit("jump-only", seed, jumps, []);
 }
 emit("idle", 42n, [], []);
+{
+  const seed = BigInt((20000 * 2654435761 + 40503) % 2147483648); // daily challenge, day 20000 (multi-segment Move test)
+  const { jumps, shots } = botLog(seed, 3600);
+  emit("daily20000", seed, jumps, shots);
+}

@@ -10,7 +10,7 @@ const DayBoardBcs = bcs.struct("DayBoard", { entries: bcs.vector(EntryBcs), fina
 const ProfileBcs = bcs.struct("Profile", { points: bcs.u64(), last_day: bcs.u64(), streak: bcs.u64(), welcomed: bcs.bool(), ach: bcs.u64() });
 const SimStateBcs = bcs.struct("SimState", {
   rng: bcs.u64(), start: bcs.u64(), kind: bcs.u64(), ehp: bcs.u64(), tick: bcs.u64(), air: bcs.u64(),
-  passed: bcs.u64(), kills: bcs.u64(), hp: bcs.u64(), inv: bcs.u64(), cd: bcs.u64(), dead: bcs.bool(),
+  passed: bcs.u64(), kills: bcs.u64(), hp: bcs.u64(), inv: bcs.u64(), cd: bcs.u64(), dead: bcs.bool(), meat: bcs.u64(),
 });
 const RunHeadBcs = bcs.struct("RunHead", { id: bcs.Address, seed: bcs.u64(), day: bcs.u64() });
 const RunBcs = bcs.struct("Run", { id: bcs.Address, seed: bcs.u64(), day: bcs.u64(), st: SimStateBcs });
@@ -120,7 +120,7 @@ export async function readRunTick(client: any, runId: string): Promise<number> {
     const c = await content(client, runId);
     // A Run from an older contract has no simulation state (only id, seed, day = 48 bytes). Parsing it with the
     // current layout reads past the end of the buffer ("Out of bounds access" in Safari), so treat it as a fresh run.
-    if (c.bytes.length < 48 + 89) return 0;
+    if (c.bytes.length < 48 + 97) return 0;
     return Number(RunBcs.parse(c.bytes).st.tick);
   } catch {
     return 0; // could not read the state: start from the first segment, the contract rejects it clearly if that is wrong

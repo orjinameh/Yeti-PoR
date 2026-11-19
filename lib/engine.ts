@@ -3,8 +3,9 @@
 // Story: Subject Y-7 (the yeti) escapes Halcyon Station. ENDLESS: the run lasts until you are recaptured, capped at MAX_TICKS (108,000 ticks, 3 hours at base speed). A level is 450 ticks.
 // Inputs: a log of jump ticks and a log of shot ticks. Shots are hitscan auto-aim (no projectile sim).
 //
-// Obstacle kinds (one active at a time, spaced >= 16 ticks apart, each overlapping the player for 3 ticks):
-//   0 crate  - hurts you if you are on the ground. Can't be shot. Jump it.
+// Items (one active at a time, spaced >= 16 ticks apart, each overlapping the player for 3 ticks):
+//   0 meat   - raw meat, food for the journey. Harmless. It floats in one of 3 lanes (low, middle, high) and is
+//              collected if the yeti is at that height at any tick of the 3-tick window. +25 score each.
 //   1 sentry - big ground enemy, 2 hp (3 from level 6). Too big to jump: it hurts you at any height until you shoot it dead.
 //   2 drone  - air enemy, 1 hp. Hurts you if you are airborne. Stay low or shoot it.
 export const MAX_TICKS = 108000; // 3 hours at base speed
@@ -23,15 +24,26 @@ const nextR = (r: bigint): bigint => (r * 1103515245n + 12345n) % M;
 const drawR = (r: bigint): number => Number((r >> 16n) % 10n);
 const rollR = (r: bigint): number => Number((r >> 8n) % 100n);
 
+const laneR = (r: bigint): number => Number((r >> 20n) % 3n);
+/** which lane the active item's meat floats in (0 low, 1 middle, 2 high); derived from the rng that made the item */
+export const laneOf = (rng: bigint): number => laneR(rng);
+/** is a yeti at height h in the given lane? low = on the ground (or just leaving it), middle = rising or falling, high = near the peak */
+export const inLane = (lane: number, h: number): boolean => (lane === 0 ? h < 12 : lane === 1 ? h >= 12 && h < 25 : h >= 25);
+/** height (sim units) at the centre of each lane, for drawing */
+export const LANE_H = [0, 18, 29];
+export const MEAT_SCORE = 25;
+/** meat achievements: collect this many in one run (on-chain kinds 4, 5, 6) */
+export const MEAT_ACH = [15, 50, 120];
+
 export function kindFor(roll: number, start: number): number {
   const stage = Math.min(3, Math.floor(start / STAGE_TICKS));
   if (stage === 0) return roll < 70 ? 0 : 1;
-  if (stage === 1) return roll < 35 ? 0 : roll < 80 ? 1 : 2;
-  if (stage === 2) return roll < 25 ? 0 : roll < 55 ? 1 : 2;
-  return roll < 20 ? 0 : roll < 50 ? 1 : 2;
+  if (stage === 1) return roll < 40 ? 0 : roll < 75 ? 1 : 2;
+  if (stage === 2) return roll < 35 ? 0 : roll < 65 ? 1 : 2;
+  return roll < 30 ? 0 : roll < 60 ? 1 : 2;
 }
-/** sentries get tougher from level 6 on (start tick 2700+) */
-export const hpFor = (kind: number, start: number): number => (kind === 1 ? (start >= STAGE_TICKS * 6 ? 3 : 2) : kind === 2 ? 1 : 0);
+/** sentries get tougher from level 6 on (start tick 2700+). For meat, ehp 1 means "still there", 0 means collected. */
+export const hpFor = (kind: number, start: number): number => (kind === 1 ? (start >= STAGE_TICKS * 6 ? 3 : 2) : 1);
 /** unbounded difficulty level, one per 450 ticks */
 export const levelOf = (tick: number): number => Math.floor(tick / STAGE_TICKS);
 /** which of the 4 environments to draw */
@@ -39,23 +51,24 @@ export const stageOf = (tick: number): number => levelOf(tick) % 4;
 /** presentation only (not part of verification): the game gets faster each level, so long runs get hard */
 export const tpsFor = (tick: number): number => Math.min(18, TPS + 1.25 * levelOf(tick));
 
-export type StepEvents = { fired: boolean; hitEnemy: boolean; killed: boolean; damaged: boolean };
-export type Upcoming = { start: number; kind: number; ehp: number };
+export type StepEvents = { fired: boolean; hitEnemy: boolean; killed: boolean; damaged: boolean; collected: boolean };
+export type Upcoming = { start: number; kind: number; ehp: number; lane: number };
 
 export class Sim {
   rng: bigint;
   start: number; // first tick of the active obstacle (spans start..start+2)
   kind: number;
-  ehp: number; // enemy hp left (kinds 1, 2)
+  ehp: number; // enemy hp left (kinds 1, 2); for meat 1 = uncollected, 0 = collected
   tick = 0;
   air = 0;
   passed = 0;
   kills = 0;
+  meat = 0;
   hp = HP_MAX;
   inv = 0;
   cd = 0;
   dead = false;
-  ev: StepEvents = { fired: false, hitEnemy: false, killed: false, damaged: false };
+  ev: StepEvents = { fired: false, hitEnemy: false, killed: false, damaged: false, collected: false };
 
   constructor(seed: bigint) {
     this.rng = nextR(seed % M);
@@ -73,7 +86,7 @@ export class Sim {
     return !this.dead && this.tick >= MAX_TICKS;
   }
   get score(): number {
-    return this.passed * 100 + this.tick + this.kills * 50 + (this.escaped ? this.hp * 50 : 0);
+    return this.passed * 100 + this.tick + this.kills * 50 + this.meat * MEAT_SCORE + (this.escaped ? this.hp * 50 : 0);
   }
   /** can a shot taken this tick actually fire? */
   canShoot(): boolean {
@@ -85,20 +98,20 @@ export class Sim {
   }
   /** upcoming obstacles (does not mutate state) */
   upcoming(n: number): Upcoming[] {
-    const out: Upcoming[] = [{ start: this.start, kind: this.kind, ehp: this.ehp }];
+    const out: Upcoming[] = [{ start: this.start, kind: this.kind, ehp: this.ehp, lane: laneR(this.rng) }];
     let r = this.rng;
     let s = this.start;
     while (out.length < n) {
       r = nextR(r);
       s = s + 16 + drawR(r);
       const k = kindFor(rollR(r), s);
-      out.push({ start: s, kind: k, ehp: hpFor(k, s) });
+      out.push({ start: s, kind: k, ehp: hpFor(k, s), lane: laneR(r) });
     }
     return out;
   }
   step(jump: boolean, shoot: boolean): void {
     if (this.over) return;
-    this.ev = { fired: false, hitEnemy: false, killed: false, damaged: false };
+    this.ev = { fired: false, hitEnemy: false, killed: false, damaged: false, collected: false };
     if (jump && this.air === 0) this.air = 1;
     if (this.cd > 0) this.cd -= 1;
     if (shoot && this.cd === 0) {
@@ -115,9 +128,14 @@ export class Sim {
     }
     const h = this.height();
     if (this.inv > 0) this.inv -= 1;
+    if (this.kind === 0 && this.ehp > 0 && this.tick >= this.start && this.tick <= this.start + 2 && inLane(laneR(this.rng), h)) {
+      this.ehp = 0;
+      this.meat += 1;
+      this.ev.collected = true;
+    }
     if (this.tick >= this.start && this.tick <= this.start + 2 && this.inv === 0) {
       const danger =
-        this.kind === 0 ? h < 3 : this.ehp === 0 ? false : this.kind === 1 ? true : h >= 3;
+        this.kind === 0 ? false : this.ehp === 0 ? false : this.kind === 1 ? true : h >= 3;
       if (danger) {
         this.hp -= 1;
         this.inv = INV_TICKS;
@@ -183,13 +201,21 @@ export function splitSegments(jumps: number[], shots: number[], finalTick: numbe
   return out;
 }
 
-/** reference bot (used for test vectors): jumps crates, shoots sentries and drones as soon as they are in range */
+/** jump tick that collects the active meat, or -1 if it needs no jump (low lane) or the item is not meat.
+ *  A jump at tick t gives height PROFILE[k] at tick t+k: start-1 puts the yeti in the middle lane, start-5 at the peak. */
+export function meatJumpTick(s: Sim): number {
+  if (s.kind !== 0 || s.ehp === 0 || s.air !== 0) return -1;
+  const lane = laneR(s.rng);
+  return lane === 1 ? s.start - 1 : lane === 2 ? s.start - 5 : -1;
+}
+
+/** reference bot (used for test vectors): collects meat in every lane, shoots sentries and drones as soon as they are in range */
 export function botLog(seed: bigint, maxTick = SEG_TICKS * 2): { jumps: number[]; shots: number[] } {
   const s = new Sim(seed);
   const jumps: number[] = [];
   const shots: number[] = [];
   while (!s.over && s.tick < maxTick) {
-    const j = s.kind === 0 && s.tick === s.start - 1;
+    const j = s.tick === meatJumpTick(s);
     const f = s.hasTarget() && s.canShoot();
     if (j) jumps.push(s.tick);
     if (f) shots.push(s.tick);
