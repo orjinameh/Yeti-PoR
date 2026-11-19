@@ -1,0 +1,166 @@
+INCLUDING DEPENDENCY MoveStdlib
+INCLUDING DEPENDENCY Sui
+BUILDING proof_of_run
+[0m[1m[38;5;11mwarning[WC09011][0m[1m: unused constant[0m
+   [0m[34m┌─[0m ./sources/proof_of_run.move:14:7
+   [0m[34m│[0m
+[0m[34m14[0m [0m[34m│[0m const [0m[33mMAX_TICKS[0m: u64 = 108000;
+   [0m[34m│[0m       [0m[33m^^^^^^^^^[0m [0m[33mThe constant 'MAX_TICKS' is never used. Consider removing it.[0m
+   [0m[34m│[0m
+   [0m[34m=[0m This warning can be suppressed with '#[allow(unused_const)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;11mwarning[WC09011][0m[1m: unused constant[0m
+   [0m[34m┌─[0m ./sources/proof_of_run.move:15:7
+   [0m[34m│[0m
+[0m[34m15[0m [0m[34m│[0m const [0m[33mSEG_TICKS[0m: u64 = 1800;
+   [0m[34m│[0m       [0m[33m^^^^^^^^^[0m [0m[33mThe constant 'SEG_TICKS' is never used. Consider removing it.[0m
+   [0m[34m│[0m
+   [0m[34m=[0m This warning can be suppressed with '#[allow(unused_const)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;11mwarning[WC09011][0m[1m: unused constant[0m
+   [0m[34m┌─[0m ./sources/proof_of_run.move:19:7
+   [0m[34m│[0m
+[0m[34m19[0m [0m[34m│[0m const [0m[33mINV_TICKS[0m: u64 = 6;
+   [0m[34m│[0m       [0m[33m^^^^^^^^^[0m [0m[33mThe constant 'INV_TICKS' is never used. Consider removing it.[0m
+   [0m[34m│[0m
+   [0m[34m=[0m This warning can be suppressed with '#[allow(unused_const)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;11mwarning[WC09011][0m[1m: unused constant[0m
+   [0m[34m┌─[0m ./sources/proof_of_run.move:20:7
+   [0m[34m│[0m
+[0m[34m20[0m [0m[34m│[0m const [0m[33mSHOT_CD[0m: u64 = 3;
+   [0m[34m│[0m       [0m[33m^^^^^^^[0m [0m[33mThe constant 'SHOT_CD' is never used. Consider removing it.[0m
+   [0m[34m│[0m
+   [0m[34m=[0m This warning can be suppressed with '#[allow(unused_const)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;11mwarning[WC09011][0m[1m: unused constant[0m
+   [0m[34m┌─[0m ./sources/proof_of_run.move:21:7
+   [0m[34m│[0m
+[0m[34m21[0m [0m[34m│[0m const [0m[33mRANGE[0m: u64 = 12;
+   [0m[34m│[0m       [0m[33m^^^^^[0m [0m[33mThe constant 'RANGE' is never used. Consider removing it.[0m
+   [0m[34m│[0m
+   [0m[34m=[0m This warning can be suppressed with '#[allow(unused_const)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;11mwarning[WC09011][0m[1m: unused constant[0m
+   [0m[34m┌─[0m ./sources/proof_of_run.move:22:7
+   [0m[34m│[0m
+[0m[34m22[0m [0m[34m│[0m const [0m[33mE_BAD_LOG[0m: u64 = 1;
+   [0m[34m│[0m       [0m[33m^^^^^^^^^[0m [0m[33mThe constant 'E_BAD_LOG' is never used. Consider removing it.[0m
+   [0m[34m│[0m
+   [0m[34m=[0m This warning can be suppressed with '#[allow(unused_const)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;11mwarning[WC09011][0m[1m: unused constant[0m
+   [0m[34m┌─[0m ./sources/proof_of_run.move:23:7
+   [0m[34m│[0m
+[0m[34m23[0m [0m[34m│[0m const [0m[33mE_SCORE_MISMATCH[0m: u64 = 2;
+   [0m[34m│[0m       [0m[33m^^^^^^^^^^^^^^^^[0m [0m[33mThe constant 'E_SCORE_MISMATCH' is never used. Consider removing it.[0m
+   [0m[34m│[0m
+   [0m[34m=[0m This warning can be suppressed with '#[allow(unused_const)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;11mwarning[WC09011][0m[1m: unused constant[0m
+   [0m[34m┌─[0m ./sources/proof_of_run.move:42:7
+   [0m[34m│[0m
+[0m[34m42[0m [0m[34m│[0m const [0m[33mPROFILE[0m: vector<u64> = vector[9, 16, 22, 27, 30, 31, 31, 30, 27, 22, 16, 9];
+   [0m[34m│[0m       [0m[33m^^^^^^^[0m [0m[33mThe constant 'PROFILE' is never used. Consider removing it.[0m
+   [0m[34m│[0m
+   [0m[34m=[0m This warning can be suppressed with '#[allow(unused_const)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;11mwarning[WC04037][0m[1m: deprecated usage[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:103:26
+    [0m[34m│[0m
+[0m[34m103[0m [0m[34m│[0m     let mut d = display::[0m[33mnew_with_fields[0m<Cosmetic>(
+    [0m[34m│[0m                          [0m[33m^^^^^^^^^^^^^^^[0m [0m[33mThe function 'sui::display::new_with_fields' is deprecated: Display V1 can no longer be created, use `display_registry` for Display V2[0m
+    [0m[34m│[0m
+    [0m[34m=[0m This warning can be suppressed with '#[allow(deprecated_usage)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;11mwarning[WC04037][0m[1m: deprecated usage[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:117:26
+    [0m[34m│[0m
+[0m[34m117[0m [0m[34m│[0m     let mut t = display::[0m[33mnew_with_fields[0m<Trophy>(
+    [0m[34m│[0m                          [0m[33m^^^^^^^^^^^^^^^[0m [0m[33mThe function 'sui::display::new_with_fields' is deprecated: Display V1 can no longer be created, use `display_registry` for Display V2[0m
+    [0m[34m│[0m
+    [0m[34m=[0m This warning can be suppressed with '#[allow(deprecated_usage)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;11mwarning[WC04037][0m[1m: deprecated usage[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:130:26
+    [0m[34m│[0m
+[0m[34m130[0m [0m[34m│[0m     let mut r = display::[0m[33mnew_with_fields[0m<Receipt>(
+    [0m[34m│[0m                          [0m[33m^^^^^^^^^^^^^^^[0m [0m[33mThe function 'sui::display::new_with_fields' is deprecated: Display V1 can no longer be created, use `display_registry` for Display V2[0m
+    [0m[34m│[0m
+    [0m[34m=[0m This warning can be suppressed with '#[allow(deprecated_usage)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;11mwarning[WC09008][0m[1m: unused function[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:168:5
+    [0m[34m│[0m
+[0m[34m168[0m [0m[34m│[0m fun [0m[33mrecord_day[0m(reg: &mut Registry, day: u64, player: address, score: u64) {
+    [0m[34m│[0m     [0m[33m^^^^^^^^^^[0m [0m[33mThe non-'public', non-'entry' function 'record_day' is never called. Consider removing it.[0m
+    [0m[34m│[0m
+    [0m[34m=[0m This warning can be suppressed with '#[allow(unused_function)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;11mwarning[WC09008][0m[1m: unused function[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:209:5
+    [0m[34m│[0m
+[0m[34m209[0m [0m[34m│[0m fun [0m[33maward_daily[0m(reg: &mut Registry, player: address, day: u64, long: bool) {
+    [0m[34m│[0m     [0m[33m^^^^^^^^^^^[0m [0m[33mThe non-'public', non-'entry' function 'award_daily' is never called. Consider removing it.[0m
+    [0m[34m│[0m
+    [0m[34m=[0m This warning can be suppressed with '#[allow(unused_function)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;11mwarning[WC09008][0m[1m: unused function[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:312:5
+    [0m[34m│[0m
+[0m[34m312[0m [0m[34m│[0m fun [0m[33mnew_state[0m(seed: u64): SimState {
+    [0m[34m│[0m     [0m[33m^^^^^^^^^[0m [0m[33mThe non-'public', non-'entry' function 'new_state' is never called. Consider removing it.[0m
+    [0m[34m│[0m
+    [0m[34m=[0m This warning can be suppressed with '#[allow(unused_function)]' applied to the 'module' or module member ('const', 'fun', or 'struct')
+
+[0m[1m[38;5;9merror[EC01002][0m[1m: unexpected token[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:323:1
+    [0m[34m│[0m
+[0m[34m323[0m [0m[34m│[0m [0m[31mfun[0m check_log(log: &vector<u16>) {
+    [0m[34m│[0m [0m[31m^^^[0m [0m[31mInvalid code unit. Expected 'address' or 'module'. Got 'fun'[0m
+
+[0m[1m[38;5;11mwarning[WC01004][0m[1m: invalid documentation comment[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:339:1
+    [0m[34m│[0m
+[0m[34m339[0m [0m[34m│[0m [0m[33m/// Final score of a finished run. The health bonus only applies if the yeti survived the whole 3 hours.[0m
+    [0m[34m│[0m [0m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [0m[33mDocumentation comment cannot be matched to a language item[0m
+
+[0m[1m[38;5;11mwarning[WC01004][0m[1m: invalid documentation comment[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:346:1
+    [0m[34m│[0m  
+[0m[34m346[0m [0m[34m│[0m [0m[33m╭[0m [0m[33m/// Advances the run by one segment (up to SEG_TICKS ticks), consuming the segment-relative logs.[0m
+[0m[34m347[0m [0m[34m│[0m [0m[33m│[0m [0m[33m/// Aborts E_BAD_LOG on a malformed log. Must match Sim in lib/engine.ts.[0m
+    [0m[34m│[0m [0m[33m╰[0m[0m[33m─────────────────────────────────────────────────────────────────────────^ Documentation comment cannot be matched to a language item[0m
+
+[0m[1m[38;5;11mwarning[WC01004][0m[1m: invalid documentation comment[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:438:1
+    [0m[34m│[0m
+[0m[34m438[0m [0m[34m│[0m [0m[33m/// Single-segment replay (score of the state after the first segment). Used by tests.[0m
+    [0m[34m│[0m [0m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [0m[33mDocumentation comment cannot be matched to a language item[0m
+
+[0m[1m[38;5;11mwarning[WC01004][0m[1m: invalid documentation comment[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:445:1
+    [0m[34m│[0m
+[0m[34m445[0m [0m[34m│[0m [0m[33m/// Free run: seed comes from sui::random. Must stay a non-public `entry` fun.[0m
+    [0m[34m│[0m [0m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [0m[33mDocumentation comment cannot be matched to a language item[0m
+
+[0m[1m[38;5;11mwarning[WC01004][0m[1m: invalid documentation comment[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:452:1
+    [0m[34m│[0m
+[0m[34m452[0m [0m[34m│[0m [0m[33m/// Daily challenge: everyone who calls this on the same UTC day gets the same seed.[0m
+    [0m[34m│[0m [0m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [0m[33mDocumentation comment cannot be matched to a language item[0m
+
+[0m[1m[38;5;11mwarning[WC01004][0m[1m: invalid documentation comment[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:458:1
+    [0m[34m│[0m  
+[0m[34m458[0m [0m[34m│[0m [0m[33m╭[0m [0m[33m/// Verifies one segment of the run. If the run is not over yet the Run is returned to the player for the[0m
+[0m[34m459[0m [0m[34m│[0m [0m[33m│[0m [0m[33m/// next segment. When the run ends (death or 3-hour cap) the claimed score must match, it is recorded and a[0m
+[0m[34m460[0m [0m[34m│[0m [0m[33m│[0m [0m[33m/// receipt is minted. A forged log or score aborts with E_SCORE_MISMATCH and the Run is not consumed.[0m
+    [0m[34m│[0m [0m[33m╰[0m[0m[33m──────────────────────────────────────────────────────────────────────────────────────────────────────^ Documentation comment cannot be matched to a language item[0m
+
+[0m[1m[38;5;11mwarning[WC01004][0m[1m: invalid documentation comment[0m
+    [0m[34m┌─[0m ./sources/proof_of_run.move:504:1
+    [0m[34m│[0m
+[0m[34m504[0m [0m[34m│[0m [0m[33m/// Runs every segment in order and returns the final score (aborts if the run is not over at the end).[0m
+    [0m[34m│[0m [0m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [0m[33mDocumentation comment cannot be matched to a language item[0m
+

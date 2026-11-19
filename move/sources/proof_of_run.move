@@ -318,7 +318,6 @@ fun new_state(seed: u64): SimState {
         tick: 0, air: 0, passed: 0, kills: 0, hp: HP_MAX, inv: 0, cd: 0, dead: false,
     }
 }
-}
 
 fun check_log(log: &vector<u16>) {
     let n = log.length();
